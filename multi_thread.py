@@ -1,6 +1,6 @@
 from PySide6.QtCore import QRunnable, QObject, Signal
 from scipy.interpolate import lagrange, CubicSpline
-from sympy import latex, symbols, simplify
+from sympy import latex, symbols, simplify, Poly
 
 
 class ExpressionWorker(QObject):
@@ -64,26 +64,25 @@ class ExpressionTask(QRunnable):
                 for i in range(len(cs.x) - 1):
                     # 获取每段多项式的系数
                     c3, c2, c1, c0 = cs.c[:, i]
-                    c3, c2, c1, c0 = map(lambda c: round(c, 4), (c3, c2, c1, c0))  # 四舍五入到4位小数
-                    interval = "[{:.3f}, {:.3f}]".format(cs.x[i], cs.x[i + 1])  # 使用 str.format()
+                    interval = "[{:.3f}, {:.3f}]".format(cs.x[i], cs.x[i + 1])  # 定义域
                     poly = (
-                            c3 * (x - cs.x[i]) ** 3 +
-                            c2 * (x - cs.x[i]) ** 2 +
-                            c1 * (x - cs.x[i]) +
-                            c0
+                        c3 * (x - cs.x[i]) ** 3 +
+                        c2 * (x - cs.x[i]) ** 2 +
+                        c1 * (x - cs.x[i]) +
+                        c0
                     )
-                    simplified_poly = simplify(poly)
-                    poly_expr.append(
-                        latex(simplified_poly) + "\\text{,} \\ x \\in " + interval + " \\\\"
-                    )
+                    if i > 0:
+                        poly = simplify(poly)
+                    p = Poly(poly, x)
+                    coeffs = [round(c, 4) for c in p.all_coeffs()]  # 获取系数
+                    new_poly = sum(coeff * x ** (len(coeffs) - 1 - j) for j, coeff in enumerate(coeffs))  # 构建新的多项式
+                    poly_expr.append(latex(new_poly) + "\\text{,} \\ x \\in " + interval + " \\\\")
                 poly_latex = "\\begin{cases}\n" + " \\\n".join(poly_expr) + "\n\\end{cases}"
 
         # 未知插值方法
         else:
             self.worker.result_ready.emit(None)
             return
-
-        print(poly_latex)
 
         # 发射结果信号
         self.worker.result_ready.emit((self.method, poly_latex))

@@ -1,36 +1,38 @@
 import math
+import pickle
+import re
 import sys
+import time
 from datetime import datetime
 from threading import Thread
 
 import numpy as np
 from PySide6.QtCharts import QChart, QChartView, QLineSeries
 from PySide6.QtCore import Qt, QThreadPool, Slot, QPointF
-from PySide6.QtGui import QPainter, QPen, QMouseEvent, QColor, QFont, QPainterPath, QPixmap, QBrush
+from PySide6.QtGui import QPainter, QPen, QMouseEvent, QColor, QFont, QPainterPath, QPixmap, QBrush, QAction
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QScrollArea, QMainWindow, QHBoxLayout, QComboBox, \
-    QLabel, QFrame, QGridLayout, QDoubleSpinBox, QPushButton, QTabWidget, QMessageBox
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QMainWindow, QHBoxLayout, QComboBox, \
+    QLabel, QFrame, QGridLayout, QDoubleSpinBox, QPushButton, QTabWidget, QMessageBox, QMenuBar, QMenu, QFileDialog, \
+    QDialog, QLineEdit
 from flask import Flask
 from flask_cors import CORS
-from matplotlib import rcParams
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+from pymodbus.client import ModbusTcpClient
 
 from multi_thread import *
 
 
 class WaveformArea(QWidget):
-    points_changed = Signal(list)
+    points_changed = Signal()
+    validity_check_result = Signal(bool)
 
     def __init__(self, config):
         super().__init__()
-        self.points = [(0.0, 0.0), (1.0, 0.0)]  # 插值点坐标
+        self.config = config  # 用户配置
         self.interpolated_points = []  # 插值曲线点坐标
-        self.x_range = 1  # X轴范围
-        self.y_range = 1  # Y轴范围
+        self.x_range = 1.0  # X轴范围
+        self.y_range = 1.0  # Y轴范围
         self.static_pixmap = None  # 缓存静态内容
         self.dragging_point = None  # 当前拖动点的索引
-        self.config = config  # 用户配置
         self.setMouseTracking(True)  # 启用鼠标跟踪，捕捉鼠标移动事件
 
     def add_point(self, x, y):
@@ -39,14 +41,14 @@ class WaveformArea(QWidget):
         :param x: 插值点X坐标
         :param y: 插值点Y坐标
         """
-        self.points.append((x, y))
+        self.config["插值点集"].append((x, y))
 
     def remove_point(self):
         """
         用户移除插值点功能实现
         """
-        if len(self.points) > 2:
-            self.points.pop()
+        if len(self.config["插值点集"]) > 2:
+            self.config["插值点集"].pop()
 
     def interpolate(self, num_points=100):
         """
@@ -54,21 +56,24 @@ class WaveformArea(QWidget):
         :param num_points: 绘制插值曲线点的数量，默认为100
         :return: list(zip(x_new, y_new))，每个元素代表一个插值点
         """
-        if len(self.points) < 2:
+        if len(self.config["插值点集"]) < 2:
             return []
 
         method = self.config.get("插值方法", 'Lagrange')
 
+        x_new, y_new = [], []
+
         # 拉格朗日插值
         if method == "Lagrange":
-            x_vals, y_vals = zip(*self.points)
+            x_vals, y_vals = zip(*self.config["插值点集"])
             poly = lagrange(x_vals, y_vals)
             x_new = np.linspace(min(x_vals), max(x_vals), num_points)
             y_new = poly(x_new)
 
+
         # 三次样条插值
         elif method == "Cubic Spline":
-            sorted_points = sorted(self.points, key=lambda p: p[0])
+            sorted_points = sorted(self.config["插值点集"], key=lambda p: p[0])
             x_vals, y_vals = zip(*sorted_points)
             poly = CubicSpline(x_vals, y_vals)
             x_new = np.linspace(min(x_vals), max(x_vals), num_points)
@@ -76,9 +81,19 @@ class WaveformArea(QWidget):
 
         # 未知插值方法
         else:
-            return []
+            self.interpolated_points.clear()
+            if self.dragging_point is None:
+                self.validity_check()
 
-        return list(zip(x_new, y_new))
+        self.interpolated_points = list(zip(x_new, y_new))
+        if self.dragging_point is None:
+            self.validity_check()
+
+    def validity_check(self):
+        if any(py > 1.0001 or py < -0.0001 for _, py in self.interpolated_points):
+            self.validity_check_result.emit(False)
+        else:
+            self.validity_check_result.emit(True)
 
     def paintEvent(self, event):
         """
@@ -96,7 +111,7 @@ class WaveformArea(QWidget):
         painter.drawPixmap(0, 0, self.static_pixmap)
 
         # 绘制数据点
-        for index, point in enumerate(self.points):
+        for index, point in enumerate(self.config["插值点集"]):
             # 跳过定点的绘制
             if index < 2:
                 continue
@@ -117,9 +132,9 @@ class WaveformArea(QWidget):
             painter.drawRect(int(x) - square_size // 2, int(y) - square_size // 2, square_size, square_size)
 
         # 绘制插值曲线
-        if len(self.points) > 1:
+        if len(self.config["插值点集"]) > 1:
             # 计算插值曲线点集
-            self.interpolated_points = self.interpolate()
+            self.interpolate()
 
             if self.interpolated_points:
                 painter.setPen(QPen(QColor(0, 0, 255), 2))  # 蓝色
@@ -167,11 +182,23 @@ class WaveformArea(QWidget):
         # 绘制网格线（浅灰色、虚线）
         grid_pen = QPen(QColor(200, 200, 200), 1, Qt.PenStyle.DotLine)
         static_painter.setPen(grid_pen)
-        tick_interval = 30  # 刻度间隔
+        tick_interval = 30  # 刻度间隔，单位为像素
         for x in range(50 + tick_interval, self.width() - 50, tick_interval):  # 垂直网格线
             static_painter.drawLine(x, 50, x, self.height() - 50)
         for y in range(50 + tick_interval, self.height() - 50, tick_interval):  # 水平网格线
             static_painter.drawLine(50, y, self.width() - 50, y)
+
+        # 绘制刻度线
+        tick_pen = QPen(QColor(0, 0, 0), 1, Qt.PenStyle.SolidLine)
+        static_painter.setPen(tick_pen)
+        for x in range(50 + tick_interval, self.width() - 50, tick_interval):  # X轴刻度
+            tick_value = (x - 50) / (self.width() - 100) * self.x_range
+            static_painter.drawLine(x, self.height() - 50, x, self.height() - 45)
+            static_painter.drawText(x - 10, self.height() - 30, f"{tick_value:.2f}")
+        for y in range(50 + tick_interval, self.height() - 50, tick_interval):  # Y轴刻度
+            tick_value = (self.height() - 50 - y) / (self.height() - 100) * self.y_range
+            static_painter.drawLine(45, y, 50, y)
+            static_painter.drawText(15, y + 5, f"{tick_value:.2f}")
 
         # 设置坐标轴标题的字体和颜色
         title_font = QFont('Times New Roman', 12, QFont.Weight.Bold)  # 加粗
@@ -180,9 +207,7 @@ class WaveformArea(QWidget):
         static_painter.setPen(QPen(title_color))
 
         # 绘制坐标轴标题
-        static_painter.drawText(30, self.height() - 30, 'O')  # 原点
-        static_painter.drawText(self.width() - 53, self.height() - 30, "1")  # 周期最大值
-        static_painter.drawText(30, 55, "1")  # 幅值最大值
+        static_painter.drawText(25, self.height() - 30, 'O')  # 原点
         static_painter.drawText(self.width() - 65, self.height() - 10, "Period")  # X轴标题
         static_painter.drawText(10, 30, "Amplitude")  # Y轴标题
 
@@ -208,12 +233,12 @@ class WaveformArea(QWidget):
                 # 若存在正在拖动的点则退出拖动状态
                 if self.dragging_point is not None:
                     self.dragging_point = None
-                    self.points_changed.emit(self.points)
+                    self.points_changed.emit()
 
                 # 不存在正在拖动的点
                 else:
                     tolerance = 8  # 容忍范围内视为可拖动，单位为像素
-                    for i, (px, py) in enumerate(self.points):
+                    for i, (px, py) in enumerate(self.config["插值点集"]):
                         # 跳过定点的检测
                         if i < 2:
                             continue
@@ -232,17 +257,17 @@ class WaveformArea(QWidget):
                         mx = (x / (self.width() - 100)) * self.x_range
                         my = (y / (self.height() - 100)) * self.y_range
                         self.add_point(mx, my)
-                        self.points_changed.emit(self.points)
+                        self.points_changed.emit()
 
                 # 更新控件显示
                 self.update()
 
         # 右键
         elif event.button() == Qt.MouseButton.RightButton:
-            if len(self.points) > 2:
+            if len(self.config["插值点集"]) > 2:
                 self.remove_point()
                 self.update()
-                self.points_changed.emit(self.points)
+                self.points_changed.emit()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         """
@@ -259,7 +284,7 @@ class WaveformArea(QWidget):
                 scaled_y = (y / (self.height() - 100)) * self.y_range
 
                 # 更新点的位置
-                self.points[self.dragging_point] = (scaled_x, scaled_y)
+                self.config["插值点集"][self.dragging_point] = (scaled_x, scaled_y)
                 self.update()
 
 
@@ -275,7 +300,11 @@ class FormulasDisplay(QWidget):
             <html lang="en">
                 <head>
                     <script id="MathJax-script" async src="http://localhost:5000/MathJax/es5/tex-mml-chtml.js"></script>
-                    <title></title>
+                    <style>
+                        p {
+                            text-align:center;
+                        }
+                    </style>
                 </head>
                 <body>
                     <p>
@@ -285,17 +314,8 @@ class FormulasDisplay(QWidget):
                 </body>
             </html>
         '''
+
         layout = QVBoxLayout()
-
-        # 滚动区域
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-
-        # 公式控件
-        # self.figure = Figure()
-        # self.canvas = FigureCanvas(self.figure)
-        # self.scroll_area.setWidget(self.canvas)
-        # layout.addWidget(self.scroll_area)
 
         # 浏览器
         self.webview = QWebEngineView()
@@ -320,46 +340,119 @@ class FormulasDisplay(QWidget):
         html_context = self.html_content_forward + result[1] + self.html_content_backward
         self.webview.setHtml(html_context)
 
-        # # 绘制公式
-        # self.figure.clear()
-        # ax = self.figure.add_subplot(111)
-        # ax.axis('off')
-        # text_obj = ax.text(0.5, 0.5, f"${result[1]}$", fontsize=16, ha='center', va='center')
-        #
-        # # 获取公式的边界框
-        # bbox = text_obj.get_window_extent().transformed(self.figure.dpi_scale_trans.inverted())
-        # formula_width = bbox.width * self.figure.dpi
-        #
-        # # 获取当前滚动区域的宽度
-        # scroll_area_width = self.scroll_area.width()
-        #
-        # # 检查公式的宽度是否超出 canvas 宽度
-        # if formula_width > scroll_area_width:
-        #     # 动态调整 FigureCanvas 的宽度
-        #     self.canvas.setFixedWidth(int(formula_width))
-        #
-        #     # 计算滚动条的新位置，设定为公式的中间
-        #     scroll_position = (formula_width - scroll_area_width) / 2
-        #
-        #     # 将滚动条移动到中间
-        #     self.scroll_area.horizontalScrollBar().setValue(int(scroll_position))
-        #
-        # self.canvas.draw()
         self.status_message.emit(f"{result[0]}插值方法计算完成！")
+
+
+class SettingDialog(QDialog):
+    status_message = Signal(str)
+
+    def __init__(self, client: ModbusTcpClient):
+        super().__init__()
+        self.client = client
+
+        self.setWindowTitle("设置")
+
+        layout = QGridLayout()
+
+        self.status_light = QLabel()
+        self.status_light.setFixedSize(20, 20)
+        layout.addWidget(self.status_light, 0, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.communication_button = QPushButton()
+        self.communication_map = {
+            "连接": self.connect_plc,
+            "断开": self.disconnect_plc,
+        }
+        self.communication_button.clicked.connect(lambda: self.communication_map[self.communication_button.text()]())
+        layout.addWidget(self.communication_button, 0, 1)
+
+        host_label = QLabel("IP地址：")
+        self.host = QLineEdit("172.168.0.3")
+        layout.addWidget(host_label, 1, 0)
+        layout.addWidget(self.host, 1, 1)
+
+        port_label = QLabel("端口：")
+        self.port = QLineEdit("25565")
+        layout.addWidget(port_label, 2, 0)
+        layout.addWidget(self.port, 2, 1)
+
+        self.update_connect_status()
+
+        self.setLayout(layout)
+
+    def connect_plc(self):
+        """
+        连接PLC功能实现
+        """
+        # IPv4规则检查
+        host_pattern = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        if not bool(re.match(host_pattern, self.host.text())):
+            QMessageBox.warning(self, "警告", "请检查当前设置IP地址是否有效！")
+            return
+
+        # 端口规则检查
+        port_pattern = r'^([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$'
+        if not bool(re.match(port_pattern, self.port.text())):
+            QMessageBox.warning(self, "警告", "请检查当前设置端口是否有效！")
+            return
+
+        host = self.host.text()
+        port = int(self.port.text())
+        self.status_message.emit(f"正在连接PLC {host}:{port}，请等待！")  # TODO: 此处信号在函数结束后才会发送
+        self.client = ModbusTcpClient(host=host, port=port)
+        self.update_connect_status()
+        if self.client is not None and self.client.connect():
+            self.status_message.emit("PLC连接成功！")
+        else:
+            self.status_message.emit("PLC连接失败！")
+
+    def disconnect_plc(self):
+        """
+        断开PLC连接功能实现
+        """
+        self.client.close()
+        self.status_message.emit("正在断开PLC！")
+        while self.client.connect():
+            time.sleep(0.1)
+        self.client = None
+        self.update_connect_status()
+        self.status_message.emit("PLC已断开！")
+
+    def update_connect_status(self):
+        """
+        更新状态灯状态功能实现
+        """
+        if self.client is not None and self.client.connect():
+            self.status_light.setStyleSheet("background-color: green; border-radius: 10px;")
+            self.communication_button.setText("断开")
+        else:
+            self.status_light.setStyleSheet("background-color: red; border-radius: 10px;")
+            self.communication_button.setText("连接")
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = {
+            "插值点集": [(0.0, 0.0), (1.0, 0.0)],
             "插值方法": "Lagrange",
             "偏移量": 0.00,
             "频率": 1.00,
             "幅值": 1.00,
         }
+        self.client = None
+        self.motor_list = []
+
+        # MathJax服务器
+        server = Flask(__name__, static_folder="./MathJax")
+        CORS(server)  # 允许跨域请求
+        mathjax_thread = Thread(target=lambda: server.run(host='0.0.0.0', port=5000, threaded=True))
+        mathjax_thread.daemon = True
+        mathjax_thread.start()
 
         # 设置窗口标题
         self.setWindowTitle("直线电机心脏驱动系统")
-        self.setGeometry(100, 100, 1200, 675)
+        self.setGeometry(100, 100, 1280, 720)
 
         # 布局
         main_layout = QHBoxLayout()
@@ -375,16 +468,46 @@ class MainWindow(QMainWindow):
         self.status_bar = self.statusBar()
 
         '''
+        菜单栏
+        '''
+        menu_bar = QMenuBar(self)
+        self.setMenuBar(menu_bar)
+
+        # 文件
+        file_menu = QMenu("文件", self)
+        menu_bar.addMenu(file_menu)
+
+        read_waveform_action = QAction("读取波形", self)
+        read_waveform_action.triggered.connect(self.read_waveform)
+        file_menu.addAction(read_waveform_action)
+
+        save_waveform_action = QAction("保存波形", self)
+        save_waveform_action.triggered.connect(self.save_waveform)
+        file_menu.addAction(save_waveform_action)
+
+        # 设置
+        setting_action = QAction("设置", self)
+        setting_action.triggered.connect(self.open_dialog)
+        menu_bar.addAction(setting_action)
+
+        '''
         左区域
         '''
         # 波形图区域
         self.waveform_area = WaveformArea(self.config)
         self.waveform_area.setMinimumHeight(400)
-        self.waveform_area.points_changed.connect(lambda points: (
-            self.formulas_area.update_polynomial(points),
-            self.update_status(f"正在使用{self.config.get('插值方法', '未知方法')}进行计算！") if len(points) > 2 else self.update_status(f"当前点的数量不足，无法计算！")
+        self.waveform_area.points_changed.connect(lambda: (
+            self.formulas_area.update_polynomial(self.config["插值点集"]),
+            self.update_status(f"正在使用{self.config.get('插值方法', '未知方法')}进行计算！")
         ))
+        self.waveform_area.validity_check_result.connect(self.update_validity_display)
         left_layout.addWidget(self.waveform_area)
+
+        # 有效性检测区域
+        self.validity_display_area = QLabel()
+        self.validity_display_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.update_validity_display(True)
+        left_layout.addWidget(self.validity_display_area)
 
         # 多控件区域
         multi_widget_area = QTabWidget()
@@ -397,7 +520,7 @@ class MainWindow(QMainWindow):
 
         # 测试波形
         series = QLineSeries()
-        series.setName("测试虚拟波形")
+        series.setName("虚拟波形")
         for i in range(100):
             x = i
             y = 50 * (1 + 0.5 * math.sin(x * 0.1))
@@ -408,10 +531,6 @@ class MainWindow(QMainWindow):
         # 多项式页
         self.formulas_area = FormulasDisplay(self.config)
         self.formulas_area.status_message.connect(self.update_status)
-        rcParams['mathtext.fontset'] = 'stix'  # 使用STIX字体集
-        rcParams['mathtext.rm'] = 'serif'  # 设置正常文本为serif字体
-        rcParams['mathtext.it'] = 'serif'  # 设置斜体字体
-        rcParams['mathtext.bf'] = 'serif'  # 设置粗体字体
         multi_widget_area.addTab(self.formulas_area, "多项式")
 
         left_layout.addWidget(multi_widget_area)
@@ -511,7 +630,7 @@ class MainWindow(QMainWindow):
         self.localization_button = QPushButton()
         self.localization_button.setText("定位")
         self.localization_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
-        motor_init_layout.addWidget(self.localization_button, 2, 0, 1 ,2)
+        motor_init_layout.addWidget(self.localization_button, 2, 0, 1, 2)
 
         self.move_to_button = QPushButton()
         self.move_to_button.setText("移动至")
@@ -586,28 +705,86 @@ class MainWindow(QMainWindow):
         """
         self.config["插值方法"] = self.select_method.currentText()
         self.waveform_area.update()
-        self.waveform_area.points_changed.emit(self.waveform_area.points)  # 发射信号触发新方法重绘
+        self.waveform_area.points_changed.emit()  # 发射信号触发新方法重绘
 
     @Slot()
     def send_data(self):
-        for _, py in self.waveform_area.interpolated_points:
+        for (_, py) in self.waveform_area.interpolated_points:
             if py > 1 or py < 0:
-                QMessageBox.warning(self, "警告", "波形超出有效范围，无法设置参数，请检查！")
+                QMessageBox.warning(self, "警告", "波形异常，无法设置参数，请检查！")
                 return
 
         QMessageBox.warning(self, "警告", "当前选中电机未启动！")
         # self.update_status("电机运行参数设置成功！")
 
+    @Slot()
+    def update_validity_display(self, result):
+        if result:
+            self.validity_display_area.setText("波形正常，可以执行！")
+            self.validity_display_area.setStyleSheet(
+                '''
+                background-color: green;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                padding-top: 5px;
+                padding-bottom: 5px;
+                '''
+            )
+        else:
+            self.validity_display_area.setText("波形异常，无法执行！")
+            self.validity_display_area.setStyleSheet(
+                '''
+                background-color: red;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                padding-top: 5px;
+                padding-bottom: 5px;
+                '''
+            )
+
+    @Slot()
+    def read_waveform(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.ReadOnly
+        fileName, _ = QFileDialog.getOpenFileName(self, "读取波形", "", "DAT Files (*.dat);;All Files (*)",
+                                                  options=options)
+        if fileName:
+            try:
+                with open(fileName, "rb") as file:
+                    self.config.update(pickle.load(file))
+                    self.select_method.setCurrentText(self.config["插值方法"])
+                    self.set_offset.setValue(self.config["偏移量"])
+                    self.set_frequency.setValue(self.config["频率"])
+                    self.set_amplitude.setValue(self.config["幅值"])
+                    self.waveform_area.update()
+                    self.waveform_area.points_changed.emit()  # 发射信号触发公式绘制
+                self.update_status(f"成功从 {fileName} 读取波形数据！")
+            except Exception as e:
+                QMessageBox.warning(self, "警告", f"读取波形数据出错: {e}")
+
+    @Slot()
+    def save_waveform(self):
+        options = QFileDialog.Options()
+        fileName, _ = QFileDialog.getSaveFileName(self, "保存波形", "", "DAT Files (*.dat);;All Files (*)",
+                                                  options=options)
+        if fileName:
+            try:
+                with open(fileName, "wb") as file:
+                    pickle.dump(self.config, file)
+                self.update_status(f"保存波形数据到 {fileName} ！")
+            except Exception as e:
+                QMessageBox.warning(self, "警告", f"保存波形数据时出错: {e}")
+
+    @Slot()
+    def open_dialog(self):
+        dialog = SettingDialog(self.client)
+        dialog.status_message.connect(self.update_status)
+        dialog.exec()
+
 
 if __name__ == "__main__":
-    # MathJax服务器
-    server = Flask(__name__, static_folder="./MathJax")
-    CORS(server)  # 允许跨域请求
-    mathjax_thread = Thread(target=lambda: server.run(host='0.0.0.0', port=5000, threaded=True))
-    mathjax_thread.daemon = True
-    mathjax_thread.start()
-
-    # UI界面
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
