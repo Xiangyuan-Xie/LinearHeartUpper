@@ -1,6 +1,7 @@
 from PySide6.QtCore import QRunnable, QObject, Signal
 from scipy.interpolate import lagrange, CubicSpline
 from sympy import latex, symbols, simplify, Poly
+from typing import Sequence
 
 
 class ExpressionWorker(QObject):
@@ -8,9 +9,16 @@ class ExpressionWorker(QObject):
 
 
 class ExpressionTask(QRunnable):
-    def __init__(self, points, method, worker):
+    def __init__(self,
+                 points: Sequence[tuple[float, float]],
+                 offset: float,
+                 amplitude: float,
+                 method: str,
+                 worker: ExpressionWorker):
         super().__init__()
         self.points = points
+        self.offset = offset
+        self.amplitude = amplitude
         self.method = method
         self.worker = worker
 

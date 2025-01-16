@@ -5,6 +5,7 @@ import sys
 import time
 from datetime import datetime
 from threading import Thread
+from typing import Optional, Dict, Any
 
 import numpy as np
 from PySide6.QtCharts import QChart, QChartView, QLineSeries
@@ -25,7 +26,7 @@ class WaveformArea(QWidget):
     points_changed = Signal()
     validity_check_result = Signal(bool)
 
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config  # 用户配置
         self.interpolated_points = []  # 插值曲线点坐标
@@ -35,7 +36,7 @@ class WaveformArea(QWidget):
         self.dragging_point = None  # 当前拖动点的索引
         self.setMouseTracking(True)  # 启用鼠标跟踪，捕捉鼠标移动事件
 
-    def add_point(self, x, y):
+    def add_point(self, x: float, y: float):
         """
         用户添加插值点功能实现
         :param x: 插值点X坐标
@@ -50,7 +51,7 @@ class WaveformArea(QWidget):
         if len(self.config["插值点集"]) > 2:
             self.config["插值点集"].pop()
 
-    def interpolate(self, num_points=100):
+    def interpolate(self, num_points: int=100):
         """
         插值计算功能实现
         :param num_points: 绘制插值曲线点的数量，默认为100
@@ -291,7 +292,7 @@ class WaveformArea(QWidget):
 class FormulasDisplay(QWidget):
     status_message = Signal(str)
 
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config
         self.thread_pool = QThreadPool.globalInstance()
@@ -325,14 +326,26 @@ class FormulasDisplay(QWidget):
         self.setLayout(layout)
 
     @Slot(list)
-    def update_polynomial(self, points):
+    def update_polynomial(self, points: Sequence[tuple[float, float]]):
+        """
+        插值多项式计算任务加载功能实现
+        :param points: 插值点集
+        """
         worker = ExpressionWorker()
         worker.result_ready.connect(self.on_result_ready)
-        task = ExpressionTask(points, self.config.get("插值方法", 'Lagrange'), worker)
+        task = ExpressionTask(points,
+                              self.config.get("偏移量", 0),
+                              self.config.get("赋值", 1),
+                              self.config.get("插值方法", 'Lagrange'),
+                              worker)
         self.thread_pool.start(task)
 
     @Slot(tuple)
-    def on_result_ready(self, result):
+    def on_result_ready(self, result: Optional[str]):
+        """
+        插值多项式计算结果显示功能实现
+        :param result:
+        """
         if result is None:
             self.status_message.emit("插值计算失败：使用了无效的插值方法！")
             return
@@ -346,17 +359,38 @@ class FormulasDisplay(QWidget):
 class SettingDialog(QDialog):
     status_message = Signal(str)
 
-    def __init__(self, client: ModbusTcpClient):
+    def __init__(self, client: Optional[ModbusTcpClient]):
         super().__init__()
         self.client = client
+        self.connect_plc_task = None
 
         self.setWindowTitle("设置")
 
         layout = QGridLayout()
 
+        status_label = QLabel("连接状态：")
+        status_label.setFixedWidth(60)
+        layout.addWidget(status_label, 0, 0)
+
         self.status_light = QLabel()
         self.status_light.setFixedSize(20, 20)
-        layout.addWidget(self.status_light, 0, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.status_light, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        host_label = QLabel("IP地址：")
+        host_label.setFixedWidth(60)
+        layout.addWidget(host_label, 1, 0)
+
+        self.host = QLineEdit("172.168.0.3")
+        self.host.setFixedWidth(110)
+        layout.addWidget(self.host, 1, 1)
+
+        port_label = QLabel("端口：")
+        port_label.setFixedWidth(60)
+        layout.addWidget(port_label, 2, 0)
+
+        self.port = QLineEdit("502")
+        self.port.setFixedWidth(110)
+        layout.addWidget(self.port, 2, 1)
 
         self.communication_button = QPushButton()
         self.communication_map = {
@@ -364,22 +398,13 @@ class SettingDialog(QDialog):
             "断开": self.disconnect_plc,
         }
         self.communication_button.clicked.connect(lambda: self.communication_map[self.communication_button.text()]())
-        layout.addWidget(self.communication_button, 0, 1)
-
-        host_label = QLabel("IP地址：")
-        self.host = QLineEdit("172.168.0.3")
-        layout.addWidget(host_label, 1, 0)
-        layout.addWidget(self.host, 1, 1)
-
-        port_label = QLabel("端口：")
-        self.port = QLineEdit("25565")
-        layout.addWidget(port_label, 2, 0)
-        layout.addWidget(self.port, 2, 1)
+        layout.addWidget(self.communication_button, 3, 0, 1, 2)
 
         self.update_connect_status()
 
         self.setLayout(layout)
 
+    @Slot()
     def connect_plc(self):
         """
         连接PLC功能实现
@@ -398,14 +423,27 @@ class SettingDialog(QDialog):
 
         host = self.host.text()
         port = int(self.port.text())
-        self.status_message.emit(f"正在连接PLC {host}:{port}，请等待！")  # TODO: 此处信号在函数结束后才会发送
-        self.client = ModbusTcpClient(host=host, port=port)
-        self.update_connect_status()
-        if self.client is not None and self.client.connect():
-            self.status_message.emit("PLC连接成功！")
-        else:
-            self.status_message.emit("PLC连接失败！")
+        self.status_message.emit(f"正在连接PLC（{host}:{port}），请等待！")
 
+        # 分离线程创建ModbusTcpClient，避免连接超时阻塞主线程
+        if self.connect_plc_task is None or not self.connect_plc_task.is_alive():
+            self.connect_plc_task = Thread(target=self.create_client, args=(host, port))
+            self.connect_plc_task.daemon = True
+            self.connect_plc_task.start()
+        else:
+            QMessageBox.warning(self, "警告", "正在连接中，请耐心等待！")
+
+    def create_client(self, host: str, port: int):
+        """
+        新建ModbusTcpClient功能实现
+        :param host: PLC的连接IP地址
+        :param port: PLC的连接端口
+        """
+        self.status_light.setStyleSheet("background-color: orange; border-radius: 10px;")
+        self.client = ModbusTcpClient(host=host, port=port)
+        self.update_connect_status("PLC连接成功！", "PLC连接失败！")
+
+    @Slot()
     def disconnect_plc(self):
         """
         断开PLC连接功能实现
@@ -418,16 +456,22 @@ class SettingDialog(QDialog):
         self.update_connect_status()
         self.status_message.emit("PLC已断开！")
 
-    def update_connect_status(self):
+    def update_connect_status(self, text0: Optional[str]=None, text1: Optional[str]=None):
         """
         更新状态灯状态功能实现
+        :param text0: 已连接状态下发送的状态栏信号文本
+        :param text1: 未连接状态下发送的状态栏信号文本
         """
         if self.client is not None and self.client.connect():
             self.status_light.setStyleSheet("background-color: green; border-radius: 10px;")
             self.communication_button.setText("断开")
+            if text0 is not None:
+                self.status_message.emit(text0)
         else:
             self.status_light.setStyleSheet("background-color: red; border-radius: 10px;")
             self.communication_button.setText("连接")
+            if text1 is not None:
+                self.status_message.emit(text1)
 
 
 class MainWindow(QMainWindow):
@@ -451,7 +495,7 @@ class MainWindow(QMainWindow):
         mathjax_thread.start()
 
         # 设置窗口标题
-        self.setWindowTitle("直线电机心脏驱动系统")
+        self.setWindowTitle("直线电机心脏驱动系统PC端")
         self.setGeometry(100, 100, 1280, 720)
 
         # 布局
@@ -467,9 +511,9 @@ class MainWindow(QMainWindow):
         # 状态栏
         self.status_bar = self.statusBar()
 
-        '''
+        """
         菜单栏
-        '''
+        """
         menu_bar = QMenuBar(self)
         self.setMenuBar(menu_bar)
 
@@ -490,9 +534,9 @@ class MainWindow(QMainWindow):
         setting_action.triggered.connect(self.open_dialog)
         menu_bar.addAction(setting_action)
 
-        '''
+        """
         左区域
-        '''
+        """
         # 波形图区域
         self.waveform_area = WaveformArea(self.config)
         self.waveform_area.setMinimumHeight(400)
@@ -535,9 +579,9 @@ class MainWindow(QMainWindow):
 
         left_layout.addWidget(multi_widget_area)
 
-        '''
+        """
         右区域
-        '''
+        """
         # 电机选择
         motor_frame = QFrame()
         motor_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -547,8 +591,7 @@ class MainWindow(QMainWindow):
         select_motor_label = QLabel("选择电机")
         select_motor_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         select_motor = QComboBox()
-        motors = ["所有电机", "1号电机"]
-        select_motor.addItems(motors)
+        select_motor.addItems(["所有电机"])
 
         motor_layout.addWidget(select_motor_label)
         motor_layout.addWidget(select_motor)
@@ -586,21 +629,29 @@ class MainWindow(QMainWindow):
         self.set_offset = QDoubleSpinBox()
         self.set_offset.setSingleStep(0.01)
         self.set_offset.setValue(self.config.get("偏移量", 0.00))
-        self.set_offset.valueChanged.connect(lambda: self.config.__setitem__("偏移量", self.set_offset.value()))
+        self.set_offset.valueChanged.connect(lambda: (
+            self.config.__setitem__("偏移量", self.set_offset.value()),
+            self.waveform_area.points_changed.emit()  # 发射信号触发插值函数重计算
+        ))
         params_layout.addWidget(self.set_offset, 1, 0)
         params_layout.addWidget(QLabel("偏移量(mm)"), 1, 1)
 
         self.set_frequency = QDoubleSpinBox()
         self.set_frequency.setSingleStep(0.01)
         self.set_frequency.setValue(self.config.get("频率", 1.00))
-        self.set_frequency.valueChanged.connect(lambda: self.config.__setitem__("频率", self.set_frequency.value()))
+        self.set_frequency.valueChanged.connect(
+            lambda: self.config.__setitem__("频率", self.set_frequency.value())
+        )
         params_layout.addWidget(self.set_frequency, 2, 0)
         params_layout.addWidget(QLabel("频率(Hz)"), 2, 1)
 
         self.set_amplitude = QDoubleSpinBox()
         self.set_amplitude.setSingleStep(0.01)
         self.set_amplitude.setValue(self.config.get("幅值", 1.00))
-        self.set_amplitude.valueChanged.connect(lambda: self.config.__setitem__("幅值", self.set_amplitude.value()))
+        self.set_amplitude.valueChanged.connect(lambda: (
+            self.config.__setitem__("幅值", self.set_amplitude.value()),
+            self.waveform_area.points_changed.emit()  # 发射信号触发插值函数重计算
+        ))
         params_layout.addWidget(self.set_amplitude, 3, 0)
         params_layout.addWidget(QLabel("幅值(mm)"), 3, 1)
 
@@ -690,7 +741,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(right_layout)
         central_widget.setLayout(main_layout)
 
-    def update_status(self, text):
+    def update_status(self, text: str):
         """
         更新状态栏信息
         :param text: 显示的文本
@@ -705,7 +756,7 @@ class MainWindow(QMainWindow):
         """
         self.config["插值方法"] = self.select_method.currentText()
         self.waveform_area.update()
-        self.waveform_area.points_changed.emit()  # 发射信号触发新方法重绘
+        self.waveform_area.points_changed.emit()  # 发射信号触发插值函数重计算
 
     @Slot()
     def send_data(self):
@@ -718,7 +769,7 @@ class MainWindow(QMainWindow):
         # self.update_status("电机运行参数设置成功！")
 
     @Slot()
-    def update_validity_display(self, result):
+    def update_validity_display(self, result: bool):
         if result:
             self.validity_display_area.setText("波形正常，可以执行！")
             self.validity_display_area.setStyleSheet(

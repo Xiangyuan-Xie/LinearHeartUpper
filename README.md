@@ -4,7 +4,7 @@
 
 ![Python Version](https://img.shields.io/badge/python-%3E%3D%203.11-blue)
 
-> 基于PySide6开发的直线电机心脏驱动系统上位机。
+> 直线电机心脏驱动系统PC端。
 
 ## 🚀 安装
 ```bash
