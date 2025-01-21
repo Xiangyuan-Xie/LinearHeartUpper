@@ -8,7 +8,7 @@ from threading import Thread
 from typing import Optional, Dict, Any
 
 import numpy as np
-from PySide6.QtCharts import QChart, QChartView, QLineSeries
+from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import Qt, QThreadPool, Slot, QPointF
 from PySide6.QtGui import QPainter, QPen, QMouseEvent, QColor, QFont, QPainterPath, QPixmap, QBrush, QAction
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -186,7 +186,7 @@ class WaveformArea(QWidget):
         tick_interval = 30  # 刻度间隔，单位为像素
         for x in range(50 + tick_interval, self.width() - 50, tick_interval):  # 垂直网格线
             static_painter.drawLine(x, 50, x, self.height() - 50)
-        for y in range(50 + tick_interval, self.height() - 50, tick_interval):  # 水平网格线
+        for y in range(self.height() - 50 - tick_interval, 50, -tick_interval):  # 水平网格线
             static_painter.drawLine(50, y, self.width() - 50, y)
 
         # 绘制刻度线
@@ -196,7 +196,7 @@ class WaveformArea(QWidget):
             tick_value = (x - 50) / (self.width() - 100) * self.x_range
             static_painter.drawLine(x, self.height() - 50, x, self.height() - 45)
             static_painter.drawText(x - 10, self.height() - 30, f"{tick_value:.2f}")
-        for y in range(50 + tick_interval, self.height() - 50, tick_interval):  # Y轴刻度
+        for y in range(self.height() - 50 - tick_interval, 50, -tick_interval):  # Y轴刻度
             tick_value = (self.height() - 50 - y) / (self.height() - 100) * self.y_range
             static_painter.drawLine(45, y, 50, y)
             static_painter.drawText(15, y + 5, f"{tick_value:.2f}")
@@ -495,17 +495,17 @@ class MainWindow(QMainWindow):
         mathjax_thread.start()
 
         # 设置窗口标题
-        self.setWindowTitle("直线电机心脏驱动系统PC端")
+        self.setWindowTitle("直线电机心脏驱动系统PC端 V4.0")
         self.setGeometry(100, 100, 1280, 720)
 
         # 布局
-        main_layout = QHBoxLayout()
-        left_layout = QVBoxLayout()
-        right_layout = QVBoxLayout()
-        right_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        main_layout = QVBoxLayout()
+        upper_layout = QHBoxLayout()
+        lower_layout = QHBoxLayout()
 
         # 中心部件
         central_widget = QWidget()
+        central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
         # 状态栏
@@ -535,11 +535,12 @@ class MainWindow(QMainWindow):
         menu_bar.addAction(setting_action)
 
         """
-        左区域
+        上区域 - 左布局
         """
+        left_layout = QVBoxLayout()
+
         # 波形图区域
         self.waveform_area = WaveformArea(self.config)
-        self.waveform_area.setMinimumHeight(400)
         self.waveform_area.points_changed.connect(lambda: (
             self.formulas_area.update_polynomial(self.config["插值点集"]),
             self.update_status(f"正在使用{self.config.get('插值方法', '未知方法')}进行计算！")
@@ -553,110 +554,104 @@ class MainWindow(QMainWindow):
         self.update_validity_display(True)
         left_layout.addWidget(self.validity_display_area)
 
-        # 多控件区域
-        multi_widget_area = QTabWidget()
-
-        # 反馈波形页
-        chart = QChart()
-        chart_view = QChartView(chart)
-        chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        multi_widget_area.addTab(chart_view, "反馈波形")
-
-        # 测试波形
-        series = QLineSeries()
-        series.setName("虚拟波形")
-        for i in range(100):
-            x = i
-            y = 50 * (1 + 0.5 * math.sin(x * 0.1))
-            series.append(QPointF(x, y))
-        chart.addSeries(series)
-        chart.createDefaultAxes()
-
-        # 多项式页
-        self.formulas_area = FormulasDisplay(self.config)
-        self.formulas_area.status_message.connect(self.update_status)
-        multi_widget_area.addTab(self.formulas_area, "多项式")
-
-        left_layout.addWidget(multi_widget_area)
+        # 左布局缩放因子
+        left_layout.setStretch(0, 9)
+        left_layout.setStretch(1, 1)
 
         """
-        右区域
+        上区域 - 中布局
         """
+        middle_layout = QVBoxLayout()
+
         # 电机选择
-        motor_frame = QFrame()
-        motor_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        motor_frame.setFrameShadow(QFrame.Shadow.Raised)
-        motor_layout = QVBoxLayout()  # 使用垂直布局
+        motor_setting_frame = QFrame()
+        motor_setting_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        motor_setting_frame.setFrameShadow(QFrame.Shadow.Raised)
+        motor_setting_layout = QGridLayout()  # 使用垂直布局
 
-        select_motor_label = QLabel("选择电机")
+        motor_setting_label = QLabel("<h3>电机设置</h3>")
+        motor_setting_layout.addWidget(motor_setting_label, 0, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        select_motor_label = QLabel("选择电机：")
         select_motor_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(select_motor_label, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+
         select_motor = QComboBox()
-        select_motor.addItems(["所有电机"])
+        select_motor.addItems(["1号电机"])
+        motor_setting_layout.addWidget(select_motor, 1, 1)
 
-        motor_layout.addWidget(select_motor_label)
-        motor_layout.addWidget(select_motor)
-        motor_frame.setLayout(motor_layout)
-        right_layout.addWidget(motor_frame)
+        rail_length_label = QLabel("导轨长度：")
+        rail_length_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(rail_length_label, 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # 插值方法
-        method_frame = QFrame()
-        method_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        method_frame.setFrameShadow(QFrame.Shadow.Raised)
-        method_layout = QGridLayout()
-
-        set_waveform_label = QLabel("设置插值方法")
+        set_waveform_label = QLabel("插值方法：")
         set_waveform_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        method_layout.addWidget(set_waveform_label, 0, 0, 1, 2)
+        motor_setting_layout.addWidget(set_waveform_label, 3, 0)
 
         self.select_method = QComboBox()
         self.select_method.addItems(["Lagrange", "Cubic Spline"])
         self.select_method.currentIndexChanged.connect(self.update_method)
-        method_layout.addWidget(self.select_method, 2, 0, 1, 2)
+        motor_setting_layout.addWidget(self.select_method, 3, 1)
 
-        method_frame.setLayout(method_layout)
-        right_layout.addWidget(method_frame)
+        self.rail_length = QDoubleSpinBox()
+        self.rail_length.setRange(0, 1000)
+        self.rail_length.setSingleStep(0.01)
+        self.rail_length.setValue(100)
+        self.rail_length.setSuffix(" mm")
+        motor_setting_layout.addWidget(self.rail_length, 2, 1)
 
-        # 周期运行参数
+        motor_setting_frame.setLayout(motor_setting_layout)
+        middle_layout.addWidget(motor_setting_frame)
+
+        # 参数设置
         params_frame = QFrame()
         params_frame.setFrameShape(QFrame.Shape.StyledPanel)
         params_frame.setFrameShadow(QFrame.Shadow.Raised)
         params_layout = QGridLayout()
 
-        set_params_label = QLabel("设置周期运行参数")
-        set_params_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        params_layout.addWidget(set_params_label, 0, 0, 1, 2)
+        params_label = QLabel("<h3>参数设置</h3>")
+        params_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        params_layout.addWidget(params_label, 0, 0, 1, 2)
 
         self.set_offset = QDoubleSpinBox()
         self.set_offset.setSingleStep(0.01)
         self.set_offset.setValue(self.config.get("偏移量", 0.00))
+        self.set_offset.setSuffix(" mm")
         self.set_offset.valueChanged.connect(lambda: (
             self.config.__setitem__("偏移量", self.set_offset.value()),
             self.waveform_area.points_changed.emit()  # 发射信号触发插值函数重计算
         ))
-        params_layout.addWidget(self.set_offset, 1, 0)
-        params_layout.addWidget(QLabel("偏移量(mm)"), 1, 1)
+        params_layout.addWidget(QLabel("偏移量："), 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        params_layout.addWidget(self.set_offset, 1, 1)
 
         self.set_frequency = QDoubleSpinBox()
         self.set_frequency.setSingleStep(0.01)
         self.set_frequency.setValue(self.config.get("频率", 1.00))
+        self.set_frequency.setSuffix(" Hz")
         self.set_frequency.valueChanged.connect(
             lambda: self.config.__setitem__("频率", self.set_frequency.value())
         )
-        params_layout.addWidget(self.set_frequency, 2, 0)
-        params_layout.addWidget(QLabel("频率(Hz)"), 2, 1)
+        params_layout.addWidget(QLabel("频率："), 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        params_layout.addWidget(self.set_frequency, 2, 1)
 
         self.set_amplitude = QDoubleSpinBox()
         self.set_amplitude.setSingleStep(0.01)
         self.set_amplitude.setValue(self.config.get("幅值", 1.00))
+        self.set_amplitude.setSuffix(" mm")
         self.set_amplitude.valueChanged.connect(lambda: (
             self.config.__setitem__("幅值", self.set_amplitude.value()),
             self.waveform_area.points_changed.emit()  # 发射信号触发插值函数重计算
         ))
-        params_layout.addWidget(self.set_amplitude, 3, 0)
-        params_layout.addWidget(QLabel("幅值(mm)"), 3, 1)
+        params_layout.addWidget(QLabel("幅值："), 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        params_layout.addWidget(self.set_amplitude, 3, 1)
 
         params_frame.setLayout(params_layout)
-        right_layout.addWidget(params_frame)
+        middle_layout.addWidget(params_frame)
+
+        """
+        上区域 - 右布局
+        """
+        right_layout = QVBoxLayout()
 
         # 电机初始化
         motor_init_frame = QFrame()
@@ -664,14 +659,14 @@ class MainWindow(QMainWindow):
         motor_init_frame.setFrameShadow(QFrame.Shadow.Raised)
         motor_init_layout = QGridLayout()
 
-        motor_init_label = QLabel("电机初始化")
+        motor_init_label = QLabel("<h3>电机初始化</h3>")
         motor_init_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_init_layout.addWidget(motor_init_label, 0, 0, 1, 2)
 
         self.status_light = QLabel()
         self.status_light.setFixedSize(20, 20)
         self.status_light.setStyleSheet("background-color: red; border-radius: 10px;")
-        motor_init_layout.addWidget(self.status_light, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        motor_init_layout.addWidget(self.status_light, 1, 0, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.activate_button = QPushButton()
         self.activate_button.setText("启动")
@@ -679,20 +674,20 @@ class MainWindow(QMainWindow):
         motor_init_layout.addWidget(self.activate_button, 1, 1)
 
         self.localization_button = QPushButton()
-        self.localization_button.setText("定位")
+        self.localization_button.setText("复位")
         self.localization_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
-        motor_init_layout.addWidget(self.localization_button, 2, 0, 1, 2)
+        motor_init_layout.addWidget(self.localization_button, 2, 1)
 
         self.move_to_button = QPushButton()
         self.move_to_button.setText("移动至")
         self.move_to_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
-        motor_init_layout.addWidget(self.move_to_button, 3, 0, 1, 2)
+        motor_init_layout.addWidget(self.move_to_button, 3, 0)
 
         self.set_movement_distance = QDoubleSpinBox()
         self.set_movement_distance.setSingleStep(0.01)
         self.set_movement_distance.setValue(0)
-        motor_init_layout.addWidget(self.set_movement_distance, 4, 0)
-        motor_init_layout.addWidget(QLabel("位置(mm)"), 4, 1)
+        self.set_movement_distance.setSuffix(" mm")
+        motor_init_layout.addWidget(self.set_movement_distance, 3, 1)
 
         motor_init_frame.setLayout(motor_init_layout)
         right_layout.addWidget(motor_init_frame)
@@ -703,43 +698,93 @@ class MainWindow(QMainWindow):
         motor_running_frame.setFrameShadow(QFrame.Shadow.Raised)
         motor_running_layout = QGridLayout()
 
-        motor_running_label = QLabel("电机运行")
+        motor_running_label = QLabel("<h3>电机运行</h3>")
         motor_running_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_running_layout.addWidget(motor_running_label, 0, 0, 1, 2)
 
         self.start_button = QPushButton()
         self.start_button.setText("开始")
-        self.start_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
+        self.start_button.setStyleSheet("QPushButton { height: 2em; } ")
+        self.start_button.clicked.connect(self.send_data)
         motor_running_layout.addWidget(self.start_button, 1, 0, 1, 2)
-
-        self.stop_to_button = QPushButton()
-        self.stop_to_button.setText("停止至")
-        self.stop_to_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
-        motor_running_layout.addWidget(self.stop_to_button, 2, 0, 1, 2)
-
-        self.set_stop_distance = QDoubleSpinBox()
-        self.set_stop_distance.setSingleStep(0.01)
-        self.set_stop_distance.setValue(0)
-        motor_running_layout.addWidget(self.set_stop_distance, 3, 0)
-        motor_running_layout.addWidget(QLabel("位置(mm)"), 3, 1)
 
         self.stop_button = QPushButton()
         self.stop_button.setText("停止")
+        self.stop_button.setStyleSheet("QPushButton { height: 2em; } ")
         self.stop_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
-        motor_running_layout.addWidget(self.stop_button, 4, 0, 1, 2)
-
-        self.set_params_button = QPushButton()
-        self.set_params_button.setText("设置参数")
-        self.set_params_button.clicked.connect(self.send_data)
-        motor_running_layout.addWidget(self.set_params_button, 5, 0, 1, 2)
+        motor_running_layout.addWidget(self.stop_button, 2, 0, 1, 2)
 
         motor_running_frame.setLayout(motor_running_layout)
         right_layout.addWidget(motor_running_frame)
 
-        # 布局
-        main_layout.addLayout(left_layout)
-        main_layout.addLayout(right_layout)
-        central_widget.setLayout(main_layout)
+        """
+        上区域 - 缩放因子
+        """
+        upper_layout.addLayout(left_layout)
+        upper_layout.addLayout(middle_layout)
+        upper_layout.addLayout(right_layout)
+        upper_layout.setStretch(0, 4)
+        upper_layout.setStretch(1, 1)
+        upper_layout.setStretch(2, 1)
+        main_layout.addLayout(upper_layout)
+
+        """
+        下区域
+        """
+        # 多页面区域
+        multi_widget_area = QTabWidget()
+
+        # 反馈波形页
+        feedback_chart = QChart()
+        feedback_chart_view = QChartView(feedback_chart)
+        feedback_chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        feedback_chart.legend().hide()
+        multi_widget_area.addTab(feedback_chart_view, "反馈波形")
+        series = QLineSeries()  # 测试波形
+        for i in range(100):
+            x = i
+            y = 50 * (1 + 0.5 * math.sin(x * 0.1))
+            series.append(QPointF(x, y))
+        feedback_chart.addSeries(series)
+        feedback_chart.createDefaultAxes()
+
+        # 模拟波形页
+        mock_chart = QChart()
+        mock_chart_view = QChartView(mock_chart)
+        mock_chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        mock_chart.legend().hide()
+        multi_widget_area.addTab(mock_chart_view, "模拟波形")
+        series = QLineSeries()  # 测试波形
+        for i in range(100):
+            x = i
+            y = 50 * (1 + 0.5 * math.sin(x * 0.1))
+            series.append(QPointF(x, y))
+        mock_chart.addSeries(series)
+        # mock_chart.createDefaultAxes()
+
+        # 虚拟波形的坐标轴
+        axis_x = QValueAxis()
+        axis_y = QValueAxis()
+        axis_x.setRange(0, 5)  # X轴范围
+        axis_y.setRange(0, 100)  # Y轴范围
+        mock_chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+        mock_chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+        series.attachAxis(axis_x)
+        series.attachAxis(axis_y)
+
+        # 多项式页
+        self.formulas_area = FormulasDisplay(self.config)
+        self.formulas_area.status_message.connect(self.update_status)
+        multi_widget_area.addTab(self.formulas_area, "多项式")
+
+        lower_layout.addWidget(multi_widget_area)
+        main_layout.addLayout(lower_layout)
+
+        """
+        主布局 - 缩放因子
+        """
+        main_layout.setStretch(0, 1)
+        main_layout.setStretch(1, 1)
 
     def update_status(self, text: str):
         """
@@ -760,6 +805,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def send_data(self):
+        """
+        波形数据发送功能实现
+        """
         for (_, py) in self.waveform_area.interpolated_points:
             if py > 1 or py < 0:
                 QMessageBox.warning(self, "警告", "波形异常，无法设置参数，请检查！")
@@ -770,6 +818,10 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def update_validity_display(self, result: bool):
+        """
+        更新有效性检查结果功能实现
+        :param result: 有效性检查结果
+        """
         if result:
             self.validity_display_area.setText("波形正常，可以执行！")
             self.validity_display_area.setStyleSheet(
@@ -797,6 +849,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def read_waveform(self):
+        """
+        从文件中读取波形数据功能实现
+        """
         options = QFileDialog.Options()
         options |= QFileDialog.ReadOnly
         fileName, _ = QFileDialog.getOpenFileName(self, "读取波形", "", "DAT Files (*.dat);;All Files (*)",
@@ -817,6 +872,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def save_waveform(self):
+        """
+        保存波形数据到文件功能实现
+        """
         options = QFileDialog.Options()
         fileName, _ = QFileDialog.getSaveFileName(self, "保存波形", "", "DAT Files (*.dat);;All Files (*)",
                                                   options=options)
@@ -830,6 +888,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def open_dialog(self):
+        """
+        打开设置窗口功能实现
+        """
         dialog = SettingDialog(self.client)
         dialog.status_message.connect(self.update_status)
         dialog.exec()
