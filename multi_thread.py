@@ -89,8 +89,7 @@ class ExpressionTask(QRunnable):
 
         # 未知插值方法
         else:
-            self.worker.result_ready.emit(None)
-            return
+            raise NotImplementedError("试图使用未定义的插值方法计算多项式！")
 
         # 发射结果信号
         self.worker.result_ready.emit((self.method, poly_latex))
