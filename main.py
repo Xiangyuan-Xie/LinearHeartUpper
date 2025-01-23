@@ -51,10 +51,10 @@ class WaveformArea(QWidget):
         if len(self.config["插值点集"]) > 2:
             self.config["插值点集"].pop()
 
-    def interpolate(self, num_points: int=100):
+    def interpolate(self, num_points: int=200):
         """
         插值计算功能实现
-        :param num_points: 绘制插值曲线点的数量，默认为100
+        :param num_points: 绘制插值曲线点的数量，默认为200
         :return: list(zip(x_new, y_new))，每个元素代表一个插值点
         """
         assert len(self.config["插值点集"]) >= 2, "插值点不满足小于2个！"
@@ -67,7 +67,6 @@ class WaveformArea(QWidget):
             poly = lagrange(x_vals, y_vals)
             x_new = np.linspace(min(x_vals), max(x_vals), num_points)
             y_new = poly(x_new)
-
 
         # 三次样条插值
         elif method == "Cubic Spline":
@@ -86,6 +85,9 @@ class WaveformArea(QWidget):
             self.validity_check()
 
     def validity_check(self):
+        """
+        有效性检查功能实现
+        """
         if any(py > 1.0001 or py < -0.0001 for _, py in self.interpolated_points):
             self.validity_check_result.emit(False)
         else:
@@ -478,6 +480,7 @@ class MainWindow(QMainWindow):
             "偏移量": 0.0,
             "频率": 1.0,
             "幅值比例": 100,
+            "有效性检查结果": True,
         }
         self.motor_pool = {
             "1号电机": {
@@ -494,7 +497,7 @@ class MainWindow(QMainWindow):
         mathjax_thread.start()
 
         # 设置窗口标题
-        self.setWindowTitle("直线电机心脏驱动系统PC端 V4.1")
+        self.setWindowTitle("直线电机心脏驱动系统PC端 V4.1.1")
         self.setGeometry(100, 100, 1280, 720)
 
         # 布局
@@ -545,6 +548,7 @@ class MainWindow(QMainWindow):
             self.update_status(f"正在使用{self.config.get('插值方法')}进行计算！"),
         ))
         self.waveform_area.validity_check_result.connect(lambda result: (
+            self.config.__setitem__("有效性检查结果", result),
             self.update_validity_display(result),
             self.update_mock_waveform(),
         ))
@@ -553,7 +557,7 @@ class MainWindow(QMainWindow):
         # 有效性检测区域
         self.validity_display_area = QLabel()
         self.validity_display_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.update_validity_display(True)
+        self.update_validity_display(self.config.get("有效性检查结果"))
         left_layout.addWidget(self.validity_display_area)
 
         # 左布局缩放因子
@@ -830,10 +834,9 @@ class MainWindow(QMainWindow):
         """
         波形数据发送功能实现
         """
-        for (_, py) in self.waveform_area.interpolated_points:
-            if py > 1 or py < 0:
-                QMessageBox.warning(self, "警告", "波形异常，无法设置参数，请检查！")
-                return
+        if not self.config.get("有效性检查结果"):
+            QMessageBox.warning(self, "警告", "波形异常，无法设置参数，请检查！")
+            return
 
         QMessageBox.warning(self, "警告", "当前选中电机未启动！")
         # self.update_status("电机运行参数设置成功！")
@@ -932,7 +935,7 @@ class MainWindow(QMainWindow):
 
                 # Y坐标变换
                 absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
-                processed_y = (absolute_y + self.config.get("偏移量")) * self.config.get("幅值比例") / 100.0  # 偏移和增幅
+                processed_y = (absolute_y * self.config.get("幅值比例") / 100.0) + self.config.get("偏移量")  # 偏移和增幅
                 if (self.mock_axis_x.min() <= processed_x <= self.mock_axis_x.max()
                         and self.mock_axis_y.min() <= processed_y <= self.mock_axis_y.max()):
                     series.append(processed_x, processed_y)
