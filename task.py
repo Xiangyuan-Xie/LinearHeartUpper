@@ -4,31 +4,31 @@ from sympy import latex, symbols, simplify, Poly
 from typing import Sequence
 
 
-class ExpressionWorker(QObject):
+class TaskRunner(QRunnable):
+    def __init__(self, task):
+        super().__init__()
+        self.task = task
+
+    def run(self):
+        self.task.run()  # 调用任务类的 run 方法
+
+
+class ExpressionTask(QObject):
     result_ready = Signal(tuple)
 
-
-class ExpressionTask(QRunnable):
-    def __init__(self,
-                 points: Sequence[tuple[float, float]],
-                 offset: float,
-                 amplitude: float,
-                 method: str,
-                 worker: ExpressionWorker):
+    def __init__(self, points: Sequence[tuple[float, float]],
+                 offset: float, amplitude: float, method: str):
         super().__init__()
         self.points = points
         self.offset = offset
         self.amplitude = amplitude
         self.method = method
-        self.worker = worker
 
     def run(self):
         """
         插值多项式计算功能实现
         """
-        if len(self.points) < 2:
-            self.worker.result_ready.emit(None)
-            return
+        assert len(self.points) >= 2, "插值点不满足小于2个！"
 
         # 拉格朗日插值
         if self.method == "Lagrange":
@@ -92,4 +92,4 @@ class ExpressionTask(QRunnable):
             raise NotImplementedError("试图使用未定义的插值方法计算多项式！")
 
         # 发射结果信号
-        self.worker.result_ready.emit((self.method, poly_latex))
+        self.result_ready.emit((self.method, poly_latex))
