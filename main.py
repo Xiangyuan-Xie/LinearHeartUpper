@@ -2,17 +2,18 @@ import math
 import pickle
 import sys
 from datetime import datetime
+from threading import Thread
 
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QMainWindow, QHBoxLayout, QComboBox, \
-    QFrame, QDoubleSpinBox, QTabWidget, QMenuBar, QMenu, QFileDialog, \
-    QSpinBox
+from PySide6.QtCore import Qt, QPointF, QThreadPool, Slot
+from PySide6.QtGui import QAction, QPainter
+from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
+                               QTabWidget, QMenuBar, QMenu, QFileDialog, QSpinBox, QVBoxLayout, QWidget, QLabel,
+                               QGridLayout, QPushButton, QMessageBox)
 from flask import Flask
 from flask_cors import CORS
 
-from widget import *
+from widget import WaveformArea, FormulasDisplay, SettingDialog
 
 
 class MainWindow(QMainWindow):
@@ -353,7 +354,7 @@ class MainWindow(QMainWindow):
         self.mock_chart.addAxis(self.mock_axis_y, Qt.AlignmentFlag.AlignLeft)
 
         # 多项式页
-        self.formulas_area = FormulasDisplay(self.config, self.thread_pool)
+        self.formulas_area = FormulasDisplay(self.config)
         self.formulas_area.status_message.connect(self.update_status)
         multi_widget_area.addTab(self.formulas_area, "多项式")
 

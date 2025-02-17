@@ -1,16 +1,17 @@
 import re
 import time
 from threading import Thread
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Sequence, Tuple
 
 import numpy as np
-from PySide6.QtCore import QThreadPool, Slot
+from PySide6.QtCore import QThreadPool, Slot, Signal
 from PySide6.QtGui import Qt, QPainter, QPen, QColor, QPainterPath, QBrush, QPixmap, QFont, QMouseEvent
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog, QGridLayout, QLabel, QLineEdit, QPushButton, QMessageBox
 from pymodbus.client import ModbusTcpClient
+from scipy.interpolate import lagrange, CubicSpline
 
-from task import *
+from task import ExpressionTask, TaskRunner
 
 
 class WaveformArea(QWidget):
@@ -279,11 +280,11 @@ class WaveformArea(QWidget):
 
 class FormulasDisplay(QWidget):
     status_message = Signal(str)
+    thread_pool = QThreadPool().globalInstance()
 
-    def __init__(self, config: Dict[str, Any], thread_pool: QThreadPool):
+    def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config
-        self.thread_pool = thread_pool
         self.html_content_forward = r'''
             <!DOCTYPE html>
             <html lang="en">
@@ -314,7 +315,7 @@ class FormulasDisplay(QWidget):
         self.setLayout(layout)
 
     @Slot(list)
-    def create_polynomial_task(self, points: Sequence[tuple[float, float]]):
+    def create_polynomial_task(self, points: Sequence[Tuple[float, float]]):
         """
         新建多项式计算任务功能实现
         :param points: 插值点集
@@ -324,7 +325,7 @@ class FormulasDisplay(QWidget):
         self.thread_pool.start(TaskRunner(task))
 
     @Slot(tuple)
-    def _on_polynomial_result_ready(self, result: tuple[str, str]):
+    def _on_polynomial_result_ready(self, result: Tuple[str, str]):
         """
         插值多项式计算结果显示功能实现
         :param result: 多项式计算结果，格式为[插值方法，插值多项式]

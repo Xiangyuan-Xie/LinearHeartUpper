@@ -1,7 +1,7 @@
+from typing import Sequence, Tuple
+
 from PySide6.QtCore import QRunnable, QObject, Signal
 from scipy.interpolate import lagrange, CubicSpline
-from sympy import latex, symbols, simplify, Poly
-from typing import Sequence
 
 
 class TaskRunner(QRunnable):
@@ -16,80 +16,100 @@ class TaskRunner(QRunnable):
 class ExpressionTask(QObject):
     result_ready = Signal(tuple)
 
-    def __init__(self, points: Sequence[tuple[float, float]],
+    def __init__(self, points: Sequence[Tuple[float, float]],
                  offset: float, amplitude: float, method: str):
         super().__init__()
-        self.points = points
+        self.__slots__ = ('points', 'offset', 'amplitude', 'method')
+        self.points = sorted(points, key=lambda p: p[0]) if method == "Cubic Spline" else points
         self.offset = offset
         self.amplitude = amplitude
         self.method = method
 
+    @staticmethod
+    def _generate_lagrange_latex(x_vals, y_vals):
+        """
+        生成拉格朗日插值多项式
+        """
+        poly = lagrange(x_vals, y_vals)
+        coeffs = poly.coeffs.tolist()
+
+        # 生成多项式项列表
+        terms = []
+        for i, c in enumerate(coeffs):
+            power = len(coeffs) - 1 - i
+            rc = round(c, 4)
+            if rc == 0 and len(coeffs) > 1: continue
+
+            if power == 0:
+                terms.append(f"{rc}")
+            elif power == 1:
+                terms.append(f"{rc}t")
+            else:
+                terms.append(f"{rc}t^{power}")
+
+        expr = " + ".join(terms).replace("+ -", " - ")
+        return f"\\( {expr} \\)"
+
+    @staticmethod
+    def _generate_cubic_spline_latex(x_vals, y_vals):
+        """
+        生成三次样条表达式
+        """
+        cs = CubicSpline(x_vals, y_vals)
+        case_exprs = []
+
+        for i in range(len(cs.x) - 1):
+            xi = round(cs.x[i], 3)
+            xi_next = round(cs.x[i + 1], 3)
+            c3, c2, c1, c0 = (round(v, 4) for v in cs.c[:, i])
+
+            # 处理负号显示问题
+            terms = []
+            if c3 != 0:
+                base = f"{c3}(t - {xi})^3" if xi != 0 else f"{c3}t^3"
+                term = base.replace("-", " - ").replace("  -", " -")
+                terms.append(term)
+            if c2 != 0:
+                base = f"{c2}(t - {xi})^2" if xi != 0 else f"{c2}t^2"
+                term = base.replace("-", " - ").replace("  -", " -")
+                terms.append(term)
+            if c1 != 0:
+                base = f"{c1}(t - {xi})" if xi != 0 else f"{c1}t"
+                term = base.replace("-", " - ").replace("  -", " -")
+                terms.append(term)
+            if c0 != 0 or not terms:
+                terms.append(f"{c0}")
+
+            expr = " + ".join(terms).replace("+ -", "- ")
+
+            # 使用对齐语法替代 cases
+            case_exprs.append(
+                f"{expr} &\\text{{, }} {xi} \\leq t < {xi_next} \\\\"
+            )
+
+        return "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
+
     def run(self):
-        """
-        插值多项式计算功能实现
-        """
         assert len(self.points) >= 2, "插值点不满足小于2个！"
 
-        # 拉格朗日插值
-        if self.method == "Lagrange":
-            # 插值计算
-            x_vals, y_vals = zip(*self.points)
-            poly = lagrange(x_vals, y_vals)
+        try:
+            if self.method == "Lagrange":
+                x_vals, y_vals = zip(*self.points)
+                poly_latex = self._generate_lagrange_latex(x_vals, y_vals)
 
-            # 将插值多项式转换为 sympy 表达式
-            x = symbols('t')
-            poly_expr = sum(round(c, 4) * x ** i for i, c in enumerate(poly))
+            elif self.method == "Cubic Spline":
+                x_vals, y_vals = zip(*self.points)
+                if len(x_vals) == 2:  # 直线特例
+                    k = round((y_vals[1] - y_vals[0]) / (x_vals[1] - x_vals[0]), 4)
+                    b = round(y_vals[0] - k * x_vals[0], 4)
+                    poly_latex = f"\\( {k}t + {b} \\)"
+                else:
+                    poly_latex = self._generate_cubic_spline_latex(x_vals, y_vals)
 
-            # 转换为 LaTeX 表达式
-            simplified_poly = simplify(poly_expr)
-            poly_latex = latex(simplified_poly)
-            poly_latex = "\( " + poly_latex + " \)"
-
-        # 三次样条插值
-        elif self.method == "Cubic Spline":
-            sorted_points = sorted(self.points, key=lambda p: p[0])
-            x_vals, y_vals = zip(*sorted_points)
-
-            # 只有2个点，使用直线插值
-            if len(self.points) == 2:
-                x1, y1 = sorted_points[0]
-                x2, y2 = sorted_points[1]
-
-                # 构造直线方程 y = kx + b
-                x = symbols('t')
-                k = round((y2 - y1) / (x2 - x1), 4)
-                b = round(y1 - k * x1, 4)
-                poly_expr = k * x + b
-                simplified_poly = simplify(poly_expr)
-                poly_latex = latex(simplified_poly)
-
-            # 有至少3个点
             else:
-                # 使用三次样条插值
-                cs = CubicSpline(x_vals, y_vals)
-                x = symbols('t')
-                poly_expr = []
-                for i in range(len(cs.x) - 1):
-                    # 获取每段多项式的系数
-                    c3, c2, c1, c0 = cs.c[:, i]
-                    interval = "[{:.3f}, {:.3f}]".format(cs.x[i], cs.x[i + 1])  # 定义域
-                    poly = (
-                        c3 * (x - cs.x[i]) ** 3 +
-                        c2 * (x - cs.x[i]) ** 2 +
-                        c1 * (x - cs.x[i]) +
-                        c0
-                    )
-                    if i > 0:
-                        poly = simplify(poly)
-                    p = Poly(poly, x)
-                    coeffs = [round(c, 4) for c in p.all_coeffs()]  # 获取系数
-                    new_poly = sum(coeff * x ** (len(coeffs) - 1 - j) for j, coeff in enumerate(coeffs))  # 构建新的多项式
-                    poly_expr.append(latex(new_poly) + "\\text{,} \\ x \\in " + interval + " \\\\")
-                poly_latex = "\\begin{cases}\n" + " \\\n".join(poly_expr) + "\n\\end{cases}"
+                raise ValueError("试图使用未定义的插值类型")
 
-        # 未知插值方法
-        else:
-            raise NotImplementedError("试图使用未定义的插值方法计算多项式！")
+            self.result_ready.emit((self.method, poly_latex))
 
-        # 发射结果信号
-        self.result_ready.emit((self.method, poly_latex))
+        except Exception as e:
+            self.result_ready.emit(("ERROR", str(e)))
