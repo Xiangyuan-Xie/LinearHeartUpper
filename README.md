@@ -1,12 +1,12 @@
-# 本科毕业设计：基于直线电机的人工心脏驱动系统LinearHeart
+# LinearHeart：基于直线电机的人工心脏驱动系统
 
 ---
 
 ![Python Version](https://img.shields.io/badge/python-%3E%3D%203.11-blue)
 
-> 直线电机心脏驱动系统PC端。
+> 北京科技大学机械工程学院本科毕业设计。
 
-## 👉 功能简介
+## 🚀 功能简介
 <img src="Doc\UI.png" alt=""/>
 
 - 完全自定义的波形设置，根据用户设置自动计算运行参数。
@@ -14,7 +14,7 @@
 - 实时显示反馈数据，系统运行情况一目了然。
 - 实时显示模拟波形，轻松预知系统运行情况。
 
-## 🚀 安装依赖库
+## ⚙️ 安装依赖库
 本项目推荐使用 Python 3.11 及以上版本进行开发，并使用 pip 工具来安装所需的依赖库。你可以通过以下命令安装所需的依赖库：
 ```bash
   pip install -r requirements.txt
@@ -38,7 +38,7 @@
 ```
 - 生成可执行程序
 ```bash
-  nuitka --onefile --windows-console-mode=disable --enable-plugin=pyside6 --mingw64 --include-data-dir=MathJax=MathJax main.py
+  nuitka --onefile --windows-console-mode=disable --include-package=scipy --enable-plugin=pyside6 --mingw64 --include-data-dir=MathJax=MathJax main.py
 ```
 
 ## 🙌 致谢
@@ -46,6 +46,6 @@
 - 感谢 [MathJax](https://www.mathjax.org/) 助力数学公式的优雅呈现！
 
 ## 🌟 作者
-- 🧑‍💻 姓名：[谢翔远](https://github.com/Xiangyuan-Xie)  
-- 🏫 学校：[北京科技大学](https://www.ustb.edu.cn/)  
-- ✉️ Email：[DragonBoat_XXY@163.com](mailto:DragonBoat_XXY@163.com)
+- 姓名：[谢翔远](https://github.com/Xiangyuan-Xie)  
+- 学校：[北京科技大学](https://www.ustb.edu.cn/)  
+- Email：[DragonBoat_XXY@163.com](mailto:DragonBoat_XXY@163.com)
