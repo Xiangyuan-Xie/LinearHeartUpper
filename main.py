@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 from threading import Thread
 
+import pandas as pd
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import Qt, QPointF, QThreadPool, Slot
 from PySide6.QtGui import QAction, QPainter
@@ -69,11 +70,11 @@ class MainWindow(QMainWindow):
         file_menu = QMenu("文件", self)
         menu_bar.addMenu(file_menu)
 
-        read_waveform_action = QAction("读取波形", self)
+        read_waveform_action = QAction("读取波形文件", self)
         read_waveform_action.triggered.connect(self._read_waveform_file)
         file_menu.addAction(read_waveform_action)
 
-        save_waveform_action = QAction("保存波形", self)
+        save_waveform_action = QAction("保存波形文件", self)
         save_waveform_action.triggered.connect(self._save_waveform_file)
         file_menu.addAction(save_waveform_action)
 
@@ -81,6 +82,14 @@ class MainWindow(QMainWindow):
         setting_action = QAction("设置", self)
         setting_action.triggered.connect(self._open_dialog)
         menu_bar.addAction(setting_action)
+
+        # 导出
+        export_menu = QMenu("导出", self)
+        menu_bar.addMenu(export_menu)
+
+        export_mock_waveform_action = QAction("导出虚拟波形", self)
+        export_mock_waveform_action.triggered.connect(self.export_mock_waveform)
+        export_menu.addAction(export_mock_waveform_action)
 
         """
         上区域 - 左布局
@@ -148,6 +157,22 @@ class MainWindow(QMainWindow):
             self.mock_axis_y.setRange(0, self.rail_length.value()),
         ))
         motor_setting_layout.addWidget(self.rail_length, 2, 1)
+
+        preview_duration_label = QLabel("预览时长：")
+        preview_duration_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(preview_duration_label, 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.preview_duration = QDoubleSpinBox()
+        self.preview_duration.setRange(0, 100)
+        self.preview_duration.setDecimals(1)
+        self.preview_duration.setSingleStep(0.1)
+        self.preview_duration.setValue(1.0)
+        self.preview_duration.setSuffix(" s")
+        self.preview_duration.valueChanged.connect(lambda: (
+            self.mock_axis_x.setRange(0, self.preview_duration.value()),
+            self._update_mock_waveform_display(),
+        ))
+        motor_setting_layout.addWidget(self.preview_duration, 3, 1)
 
         motor_setting_frame.setLayout(motor_setting_layout)
         middle_layout.addWidget(motor_setting_frame)
@@ -488,6 +513,34 @@ class MainWindow(QMainWindow):
         self.mock_chart.addSeries(series)
         series.attachAxis(self.mock_axis_x)
         series.attachAxis(self.mock_axis_y)
+
+    @Slot()
+    def export_mock_waveform(self):
+        """
+        导出虚拟波形
+        """
+        options = QFileDialog.Options()
+        fileName, _ = QFileDialog.getSaveFileName(self, "导出虚拟波形", "",
+                                                  "CSV Files (*.csv);;All Files (*)", options=options)
+
+        if fileName:
+            result = []
+            for x, y in self.waveform_area.interpolated_points:
+                # X坐标变换
+                processed_x = x / self.config.get("频率")
+
+                # Y坐标变换
+                absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
+                processed_y = (absolute_y * self.config.get("幅值比例") / 100.0) + self.config.get("偏移量")  # 偏移和增幅
+
+                result.append((processed_x, max(self.mock_axis_y.min(), min(processed_y, self.mock_axis_y.max()))))
+
+            df = pd.DataFrame(result, columns=['x', 'y'])
+            df.astype({'x': 'float32', 'y': 'float32'}).to_csv(
+                fileName,
+                index=False,
+                float_format='%.4f'  # 统一小数位数
+            )
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ class WaveformArea(QWidget):
         if len(self.config["插值点集"]) > 2:
             self.config["插值点集"].pop()
 
-    def _interpolate(self, num_points: int=200):
+    def _interpolate(self, num_points: int=1000):
         """
         插值计算功能实现
         :param num_points: 绘制插值曲线点的数量，默认为200
@@ -70,7 +70,7 @@ class WaveformArea(QWidget):
 
         # 未知插值方法
         else:
-            raise NotImplementedError("使用未定义的插值方法拟合曲线！")
+            raise ValueError("使用未定义的插值方法拟合曲线！")
 
         self.interpolated_points = list(zip(x_new, y_new))
         if self.dragging_point is None:
