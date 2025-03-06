@@ -6,7 +6,7 @@ from threading import Thread
 
 import pandas as pd
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from PySide6.QtCore import Qt, QPointF, QThreadPool, Slot
+from PySide6.QtCore import Qt, QPointF, QThreadPool, Slot, QDir
 from PySide6.QtGui import QAction, QPainter
 from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
                                QTabWidget, QMenuBar, QMenu, QFileDialog, QSpinBox, QVBoxLayout, QWidget, QLabel,
@@ -448,39 +448,56 @@ class MainWindow(QMainWindow):
         """
         从文件中读取波形数据功能实现
         """
-        options = QFileDialog.Options()
-        options |= QFileDialog.ReadOnly
-        fileName, _ = QFileDialog.getOpenFileName(self, "读取波形", "", "DAT Files (*.dat);;All Files (*)",
-                                                  options=options)
-        if fileName:
-            try:
-                with open(fileName, "rb") as file:
-                    self.config.update(pickle.load(file))
-                    self.select_method.setCurrentText(self.config["插值方法"])
-                    self.set_offset.setValue(self.config["偏移量"])
-                    self.set_frequency.setValue(self.config["频率"])
-                    self.set_amplitude.setValue(self.config["幅值"])
-                    self.waveform_area.update()
-                    self.waveform_area.points_changed.emit()  # 发射信号触发公式绘制
-                self.update_status(f"成功从 {fileName} 读取波形数据！")
-            except Exception as e:
-                QMessageBox.warning(self, "警告", f"读取波形数据出错: {e}")
+        dialog = QFileDialog(parent=self, acceptMode=QFileDialog.AcceptMode.AcceptOpen, defaultSuffix="dat",
+                             options=QFileDialog.Option.DontUseNativeDialog | QFileDialog.Option.ReadOnly)
+        dialog.setWindowTitle("读取波形")
+        dialog.setNameFilter("DAT Files (*.dat);;All Files (*)")
+
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                file_path = selected_files[0]
+
+                normalized_path = QDir.toNativeSeparators(file_path)  # 路径标准化处理（跨平台兼容）
+
+                try:
+                    with open(normalized_path, "rb") as file:
+                        self.config.update(pickle.load(file))
+                        self.select_method.setCurrentText(self.config["插值方法"])
+                        self.set_offset.setValue(self.config["偏移量"])
+                        self.set_frequency.setValue(self.config["频率"])
+                        self.set_amplitude.setValue(self.config["幅值比例"])
+                        self.waveform_area.update()
+                        self.waveform_area.points_changed.emit()  # 发射信号触发公式绘制
+                    self.update_status(f"成功从 {normalized_path} 读取波形数据！")
+                except Exception as e:
+                    QMessageBox.critical(self, "警告", f"读取波形数据出错: {e}")
+
 
     @Slot()
     def _save_waveform_file(self):
         """
         保存波形数据到文件功能实现
         """
-        options = QFileDialog.Options()
-        fileName, _ = QFileDialog.getSaveFileName(self, "保存波形", "", "DAT Files (*.dat);;All Files (*)",
-                                                  options=options)
-        if fileName:
-            try:
-                with open(fileName, "wb") as file:
-                    pickle.dump(self.config, file)
-                self.update_status(f"保存波形数据到 {fileName} ！")
-            except Exception as e:
-                QMessageBox.warning(self, "警告", f"保存波形数据时出错: {e}")
+        dialog = QFileDialog(parent=self, acceptMode=QFileDialog.AcceptMode.AcceptSave, defaultSuffix="dat",
+                             options=QFileDialog.Option.DontUseNativeDialog | QFileDialog.Option.ReadOnly)
+        dialog.setWindowTitle("保存波形")
+        dialog.setNameFilter("DAT Files (*.dat);;All Files (*)")
+
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                file_path = selected_files[0]
+
+                normalized_path = QDir.toNativeSeparators(file_path)  # 路径标准化处理（跨平台兼容）
+
+                try:
+                    with open(normalized_path, "wb") as f:
+                        pickle.dump(self.config, f)
+                    self.update_status(f"保存波形数据到 {normalized_path} ！")
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"保存波形数据时出错: {e}")
+
 
     @Slot()
     def _open_dialog(self):
@@ -519,28 +536,39 @@ class MainWindow(QMainWindow):
         """
         导出虚拟波形
         """
-        options = QFileDialog.Options()
-        fileName, _ = QFileDialog.getSaveFileName(self, "导出虚拟波形", "",
-                                                  "CSV Files (*.csv);;All Files (*)", options=options)
+        dialog = QFileDialog(parent=self, acceptMode=QFileDialog.AcceptMode.AcceptSave, defaultSuffix="csv",
+                             options=QFileDialog.Option.DontUseNativeDialog | QFileDialog.Option.ReadOnly)
+        dialog.setWindowTitle("导出虚拟波形")
+        dialog.setNameFilter("CSV Files (*.csv);;All Files (*)")
 
-        if fileName:
-            result = []
-            for x, y in self.waveform_area.interpolated_points:
-                # X坐标变换
-                processed_x = x / self.config.get("频率")
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                file_path = selected_files[0]
 
-                # Y坐标变换
-                absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
-                processed_y = (absolute_y * self.config.get("幅值比例") / 100.0) + self.config.get("偏移量")  # 偏移和增幅
+                normalized_path = QDir.toNativeSeparators(file_path)  # 路径标准化处理（跨平台兼容）
 
-                result.append((processed_x, max(self.mock_axis_y.min(), min(processed_y, self.mock_axis_y.max()))))
+                try:
+                    result = []
+                    for x, y in self.waveform_area.interpolated_points:
+                        # X坐标变换
+                        processed_x = x / self.config.get("频率")
 
-            df = pd.DataFrame(result, columns=['x', 'y'])
-            df.astype({'x': 'float32', 'y': 'float32'}).to_csv(
-                fileName,
-                index=False,
-                float_format='%.4f'  # 统一小数位数
-            )
+                        # Y坐标变换
+                        absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
+                        processed_y = (absolute_y * self.config.get("幅值比例") / 100.0) + self.config.get("偏移量")  # 偏移和增幅
+
+                        result.append(
+                            (processed_x, max(self.mock_axis_y.min(), min(processed_y, self.mock_axis_y.max()))))
+
+                    df = pd.DataFrame(result, columns=['x', 'y'])
+                    df.astype({'x': 'float32', 'y': 'float32'}).to_csv(
+                        normalized_path,
+                        index=False,
+                        float_format='%.4f'  # 统一小数位数
+                    )
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"导出虚拟波形时出错: {e}！")
 
 
 if __name__ == "__main__":
