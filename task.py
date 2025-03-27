@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Any
 
 from PySide6.QtCore import QRunnable, QObject, Signal
 from scipy.interpolate import lagrange, CubicSpline
@@ -14,7 +14,7 @@ class TaskRunner(QRunnable):
 
 
 class ExpressionTask(QObject):
-    result_ready = Signal(tuple)
+    result_ready = Signal(Any, str, str)
 
     def __init__(self, points: Sequence[Tuple[float, float]],
                  offset: float, amplitude: float, method: str):
@@ -48,20 +48,21 @@ class ExpressionTask(QObject):
                 terms.append(f"{rc}t^{power}")
 
         expr = " + ".join(terms).replace("+ -", " - ")
-        return f"\\( {expr} \\)"
+        return poly, f"\\( {expr} \\)"
 
     @staticmethod
     def _generate_cubic_spline_latex(x_vals, y_vals):
         """
         生成三次样条表达式
         """
-        cs = CubicSpline(x_vals, y_vals)
+        poly = CubicSpline(x_vals, y_vals)
+
         case_exprs = []
 
-        for i in range(len(cs.x) - 1):
-            xi = round(cs.x[i], 3)
-            xi_next = round(cs.x[i + 1], 3)
-            c3, c2, c1, c0 = (round(v, 4) for v in cs.c[:, i])
+        for i in range(len(poly.x) - 1):
+            xi = round(poly.x[i], 3)
+            xi_next = round(poly.x[i + 1], 3)
+            c3, c2, c1, c0 = (round(v, 4) for v in poly.c[:, i])
 
             # 处理负号显示问题
             terms = []
@@ -87,7 +88,7 @@ class ExpressionTask(QObject):
                 f"{expr} &\\text{{, }} {xi} \\leq t < {xi_next} \\\\"
             )
 
-        return "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
+        return poly, "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
 
     def run(self):
         assert len(self.points) >= 2, "插值点不满足小于2个！"
@@ -95,21 +96,17 @@ class ExpressionTask(QObject):
         try:
             if self.method == "Lagrange":
                 x_vals, y_vals = zip(*self.points)
-                poly_latex = self._generate_lagrange_latex(x_vals, y_vals)
-
+                poly, poly_latex = self._generate_lagrange_latex(x_vals, y_vals)
             elif self.method == "Cubic Spline":
                 x_vals, y_vals = zip(*self.points)
                 if len(x_vals) == 2:  # 直线特例
-                    k = round((y_vals[1] - y_vals[0]) / (x_vals[1] - x_vals[0]), 4)
-                    b = round(y_vals[0] - k * x_vals[0], 4)
-                    poly_latex = f"\\( {k}t + {b} \\)"
+                    poly, poly_latex = self._generate_lagrange_latex(x_vals, y_vals)
                 else:
-                    poly_latex = self._generate_cubic_spline_latex(x_vals, y_vals)
-
+                    poly, poly_latex = self._generate_cubic_spline_latex(x_vals, y_vals)
             else:
-                raise ValueError("试图使用未定义的插值类型")
+                raise ValueError("试图使用未定义的插值类型！")
 
-            self.result_ready.emit((self.method, poly_latex))
+            self.result_ready.emit(poly, self.method, poly_latex)
 
         except Exception as e:
             self.result_ready.emit(("ERROR", str(e)))

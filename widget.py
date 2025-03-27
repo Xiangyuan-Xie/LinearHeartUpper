@@ -285,6 +285,7 @@ class FormulasDisplay(QWidget):
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.config = config
+        self.polynomial_object = None
         self.html_content_forward = r'''
             <!DOCTYPE html>
             <html lang="en">
@@ -324,47 +325,37 @@ class FormulasDisplay(QWidget):
         task.result_ready.connect(self._on_polynomial_result_ready)
         self.thread_pool.start(TaskRunner(task))
 
-    @Slot(tuple)
-    def _on_polynomial_result_ready(self, result: Tuple[str, str]):
+    @Slot(Any, str, str)
+    def _on_polynomial_result_ready(self, polynomial_object, method: str, result: str):
         """
         插值多项式计算结果显示功能实现
-        :param result: 多项式计算结果，格式为[插值方法，插值多项式]
+        :param polynomial_object: 多项式对象
+        :param method: 多项式插值方法
+        :param result: 多项式计算结果
         """
-        if result is None:
-            self.status_message.emit("插值计算失败：使用了无效的插值方法！")
-            return
+        self.polynomial_object = (method, polynomial_object)
 
-        html_context = self.html_content_forward + result[1] + self.html_content_backward
+        html_context = self.html_content_forward + result + self.html_content_backward
         self.webview.setHtml(html_context)
 
-        self.status_message.emit(f"{result[0]}插值方法计算完成！")
+        self.status_message.emit(f"{method}插值方法计算完成！")
 
 
-class SettingDialog(QDialog):
+class ConnectDialog(QDialog):
     status_message = Signal(str)
+    connection_info = Signal(str, int)
 
-    def __init__(self, client: Optional[ModbusTcpClient]):
+    def __init__(self):
         super().__init__()
-        self.client = client
-        self.connect_plc_task = None
-
         self.setWindowTitle("设置")
 
         layout = QGridLayout()
-
-        status_label = QLabel("连接状态：")
-        status_label.setFixedWidth(60)
-        layout.addWidget(status_label, 0, 0)
-
-        self.status_light = QLabel()
-        self.status_light.setFixedSize(20, 20)
-        layout.addWidget(self.status_light, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
         host_label = QLabel("IP地址：")
         host_label.setFixedWidth(60)
         layout.addWidget(host_label, 1, 0)
 
-        self.host = QLineEdit("172.168.0.3")
+        self.host = QLineEdit("127.0.0.1")
         self.host.setFixedWidth(110)
         layout.addWidget(self.host, 1, 1)
 
@@ -376,15 +367,9 @@ class SettingDialog(QDialog):
         self.port.setFixedWidth(110)
         layout.addWidget(self.port, 2, 1)
 
-        self.communication_button = QPushButton()
-        self.communication_map = {
-            "连接": self._connect_plc,
-            "断开": self._disconnect_plc,
-        }
-        self.communication_button.clicked.connect(lambda: self.communication_map[self.communication_button.text()]())
+        self.communication_button = QPushButton("连接")
+        self.communication_button.clicked.connect(self._connect_plc)
         layout.addWidget(self.communication_button, 3, 0, 1, 2)
-
-        self._update_connect_status()
 
         self.setLayout(layout)
 
@@ -408,51 +393,6 @@ class SettingDialog(QDialog):
         host = self.host.text()
         port = int(self.port.text())
         self.status_message.emit(f"正在连接PLC（{host}:{port}），请等待！")
+        self.connection_info.emit(host, port)
 
-        # 分离线程创建ModbusTcpClient，避免连接超时阻塞主线程
-        if self.connect_plc_task is None or not self.connect_plc_task.is_alive():
-            self.connect_plc_task = Thread(target=self._create_client, args=(host, port))
-            self.connect_plc_task.daemon = True
-            self.connect_plc_task.start()
-        else:
-            QMessageBox.warning(self, "警告", "正在连接中，请耐心等待！")
-
-    def _create_client(self, host: str, port: int):
-        """
-        新建ModbusTcpClient功能实现
-        :param host: PLC的连接IP地址
-        :param port: PLC的连接端口
-        """
-        self.status_light.setStyleSheet("background-color: orange; border-radius: 10px;")
-        self.client = ModbusTcpClient(host=host, port=port)
-        self._update_connect_status("PLC连接成功！", "PLC连接失败！")
-
-    @Slot()
-    def _disconnect_plc(self):
-        """
-        断开PLC连接功能实现
-        """
-        self.client.close()
-        self.status_message.emit("正在断开PLC！")
-        while self.client.connect():
-            time.sleep(0.1)
-        self.client = None
-        self._update_connect_status()
-        self.status_message.emit("PLC已断开！")
-
-    def _update_connect_status(self, text0: Optional[str]=None, text1: Optional[str]=None):
-        """
-        更新状态灯状态功能实现
-        :param text0: 已连接状态下发送的状态栏信号文本
-        :param text1: 未连接状态下发送的状态栏信号文本
-        """
-        if self.client is not None and self.client.connect():
-            self.status_light.setStyleSheet("background-color: green; border-radius: 10px;")
-            self.communication_button.setText("断开")
-            if text0 is not None:
-                self.status_message.emit(text0)
-        else:
-            self.status_light.setStyleSheet("background-color: red; border-radius: 10px;")
-            self.communication_button.setText("连接")
-            if text1 is not None:
-                self.status_message.emit(text1)
+        self.accept()

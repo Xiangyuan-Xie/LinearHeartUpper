@@ -3,7 +3,9 @@ import pickle
 import sys
 from datetime import datetime
 from threading import Thread
+from typing import Optional
 
+import numpy as np
 import pandas as pd
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import Qt, QPointF, QThreadPool, Slot, QDir
@@ -13,8 +15,10 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox
                                QGridLayout, QPushButton, QMessageBox)
 from flask import Flask
 from flask_cors import CORS
+from pymodbus.client import ModbusTcpClient
 
-from widget import WaveformArea, FormulasDisplay, SettingDialog
+from common import generate_packet
+from widget import WaveformArea, FormulasDisplay, ConnectDialog
 
 
 class MainWindow(QMainWindow):
@@ -33,7 +37,7 @@ class MainWindow(QMainWindow):
                 "导轨长度": 100.0,
             }
         }
-        self.client = None
+        self.client: Optional[ModbusTcpClient] = None
         self.thread_pool = QThreadPool.globalInstance()
 
         # MathJax服务器
@@ -44,7 +48,7 @@ class MainWindow(QMainWindow):
         mathjax_thread.start()
 
         # 设置窗口标题
-        self.setWindowTitle("直线电机心脏驱动系统PC端 V4.1.1")
+        self.setWindowTitle("直线电机心脏驱动系统PC端")
         self.setGeometry(100, 100, 1280, 720)
 
         # 布局
@@ -78,10 +82,10 @@ class MainWindow(QMainWindow):
         save_waveform_action.triggered.connect(self._save_waveform_file)
         file_menu.addAction(save_waveform_action)
 
-        # 设置
-        setting_action = QAction("设置", self)
-        setting_action.triggered.connect(self._open_dialog)
-        menu_bar.addAction(setting_action)
+        # 连接
+        connect_action = QAction("连接", self)
+        connect_action.triggered.connect(self._open_dialog)
+        menu_bar.addAction(connect_action)
 
         # 导出
         export_menu = QMenu("导出", self)
@@ -303,7 +307,7 @@ class MainWindow(QMainWindow):
         self.stop_button = QPushButton()
         self.stop_button.setText("停止")
         self.stop_button.setStyleSheet("QPushButton { height: 2.5em; } ")
-        self.stop_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
+        # self.stop_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
         motor_running_layout.addWidget(self.stop_button, 3, 0, 2, 2)
 
         motor_running_frame.setLayout(motor_running_layout)
@@ -405,12 +409,30 @@ class MainWindow(QMainWindow):
         """
         波形数据发送功能实现
         """
-        if not self.config.get("规则检查结果"):
-            QMessageBox.warning(self, "警告", "波形异常，无法设置参数，请检查！")
-            return
-
-        QMessageBox.warning(self, "警告", "当前选中电机未启动！")
+        # if not self.config.get("规则检查结果"):
+        #     QMessageBox.warning(self, "警告", "波形异常，无法设置参数，请检查！")
+        #     return
+        #
+        # QMessageBox.warning(self, "警告", "当前选中电机未启动！")
         # self.update_status("电机运行参数设置成功！")
+        # if self.client is not None and self.client.is_socket_open():
+        #     self.client.write_registers(0, [1, 2, 3, 4, 5], slave=1)
+        # else:
+        #     QMessageBox.warning(self, "警告", "当前选中电机未启动！")
+        polynomial_object = self.formulas_area.polynomial_object
+        if polynomial_object[0] == "Lagrange":
+            coefficient_matrix = np.flip(polynomial_object[1].coeffs)
+        elif polynomial_object[0] == "Cubic Spline":
+            coefficient_matrix = np.column_stack([
+                polynomial_object[1].x[:-1],  # 区间起点
+                polynomial_object[1].x[1:],  # 区间终点
+                polynomial_object[1].c.T  # 系数 a, b, c, d
+            ])
+        else:
+            raise ValueError("试图使用未定义的插值类型！")
+
+        self.client.write_registers(0, generate_packet(polynomial_object[0], coefficient_matrix), slave=1)
+
 
     @Slot()
     def _update_rule_check_result_display(self, result: bool):
@@ -504,8 +526,9 @@ class MainWindow(QMainWindow):
         """
         打开设置窗口功能实现
         """
-        dialog = SettingDialog(self.client)
+        dialog = ConnectDialog()
         dialog.status_message.connect(self.update_status)
+        dialog.connection_info.connect(self._create_client)
         dialog.exec()
 
     @Slot()
@@ -569,6 +592,19 @@ class MainWindow(QMainWindow):
                     )
                 except Exception as e:
                     QMessageBox.critical(self, "错误", f"导出虚拟波形时出错: {e}！")
+
+    @Slot(str, int)
+    def _create_client(self, host: str, port: int):
+        """
+        新建ModbusTcpClient功能实现
+        :param host: PLC的连接IP地址
+        :param port: PLC的连接端口
+        """
+        self.client = ModbusTcpClient(host=host, port=port)
+        # if self.client.is_socket_open():
+        #     self.update_status("PLC连接成功！")
+        # else:
+        #     self.update_status("PLC连接失败！")
 
 
 if __name__ == "__main__":
