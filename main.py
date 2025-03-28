@@ -17,7 +17,7 @@ from flask import Flask
 from flask_cors import CORS
 from pymodbus.client import ModbusTcpClient
 
-from common import generate_packet
+from communication import interval_encode, SplineCoefficientCompressor
 from widget import WaveformArea, FormulasDisplay, ConnectDialog
 
 
@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
         }
         self.client: Optional[ModbusTcpClient] = None
         self.thread_pool = QThreadPool.globalInstance()
+        self.compressor = SplineCoefficientCompressor()
 
         # MathJax服务器
         server = Flask(__name__, static_folder="./MathJax")
@@ -421,17 +422,17 @@ class MainWindow(QMainWindow):
         #     QMessageBox.warning(self, "警告", "当前选中电机未启动！")
         polynomial_object = self.formulas_area.polynomial_object
         if polynomial_object[0] == "Lagrange":
-            coefficient_matrix = np.flip(polynomial_object[1].coeffs)
+            packet = []
         elif polynomial_object[0] == "Cubic Spline":
-            coefficient_matrix = np.column_stack([
-                polynomial_object[1].x[:-1],  # 区间起点
-                polynomial_object[1].x[1:],  # 区间终点
-                polynomial_object[1].c.T  # 系数 a, b, c, d
-            ])
+            encoded_interval_matrix = interval_encode(polynomial_object[1].x[:-1], polynomial_object[1].x[1:])
+            encoded_coefficient_matrix = self.compressor.compress(polynomial_object[1].c.T)
+            packet = np.concatenate(np.column_stack([encoded_interval_matrix, encoded_coefficient_matrix]))
         else:
             raise ValueError("试图使用未定义的插值类型！")
 
-        self.client.write_registers(0, generate_packet(polynomial_object[0], coefficient_matrix), slave=1)
+        print(packet)
+
+        self.client.write_registers(0, packet, slave=1)
 
 
     @Slot()
@@ -601,10 +602,10 @@ class MainWindow(QMainWindow):
         :param port: PLC的连接端口
         """
         self.client = ModbusTcpClient(host=host, port=port)
-        # if self.client.is_socket_open():
-        #     self.update_status("PLC连接成功！")
-        # else:
-        #     self.update_status("PLC连接失败！")
+        if self.client.connect() and self.client.is_socket_open():
+            self.update_status("PLC连接成功！")
+        else:
+            self.update_status("PLC连接失败！")
 
 
 if __name__ == "__main__":
