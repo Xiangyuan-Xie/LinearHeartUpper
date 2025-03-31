@@ -17,20 +17,23 @@ from flask import Flask
 from flask_cors import CORS
 from pymodbus.client import ModbusTcpClient
 
+from common import Interpolation, InterpolationManager
 from communication import interval_encode, SplineCoefficientCompressor
-from widget import WaveformArea, FormulasDisplay, ConnectDialog
+from widget.dialog.connect_plc import ConnectDialog
+from widget.latex_board import LatexBoard
+from widget.waveform_modulator import WaveformModulator, WaveformStatus
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = {
-            "插值方法": "Lagrange",
+            "插值方法": Interpolation.Akima,
             "插值点集": [(0.0, 0.0), (1.0, 0.0)],
             "偏移量": 0.0,
             "频率": 1.0,
             "幅值比例": 100,
-            "规则检查结果": True,
+            "波形状态": WaveformStatus.Unset,
         }
         self.motor_pool = {
             "1号电机": {
@@ -39,7 +42,7 @@ class MainWindow(QMainWindow):
         }
         self.client: Optional[ModbusTcpClient] = None
         self.thread_pool = QThreadPool.globalInstance()
-        self.compressor = SplineCoefficientCompressor()
+        # self.compressor = SplineCoefficientCompressor()
 
         # MathJax服务器
         server = Flask(__name__, static_folder="./MathJax")
@@ -101,24 +104,24 @@ class MainWindow(QMainWindow):
         """
         left_layout = QVBoxLayout()
 
-        # 波形图区域
-        self.waveform_area = WaveformArea(self.config)
-        self.waveform_area.points_changed.connect(lambda: (
-            self.formulas_area.create_polynomial_task(self.config["插值点集"]),
-            self.update_status(f"正在使用{self.config.get('插值方法')}进行计算！"),
+        # 波形调制区域
+        self.waveform_modulator = WaveformModulator(self.config)
+        self.waveform_modulator.points_changed.connect(lambda: (
+            self.latex_board.create_polynomial_task(self.config["插值点集"]),
+            self.update_status(f"正在使用{InterpolationManager.get_name(self.config.get('插值方法'))}插值法进行计算！"),
         ))
-        self.waveform_area.rule_check_result.connect(lambda result: (
-            self.config.__setitem__("规则检查结果", result),
-            self._update_rule_check_result_display(result),
+        self.waveform_modulator.waveform_status.connect(lambda status: (
+            self.config.__setitem__("波形状态", status),
+            self.update_waveform_status(status),
             self._update_mock_waveform_display(),
         ))
-        left_layout.addWidget(self.waveform_area)
+        left_layout.addWidget(self.waveform_modulator)
 
-        # 有效性检测区域
-        self.validity_display_area = QLabel()
-        self.validity_display_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._update_rule_check_result_display(self.config.get("规则检查结果"))
-        left_layout.addWidget(self.validity_display_area)
+        # 波形状态区域
+        self.waveform_status_board = QLabel()
+        self.waveform_status_board.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.update_waveform_status(self.config.get("波形状态"))
+        left_layout.addWidget(self.waveform_status_board)
 
         # 左布局缩放因子
         left_layout.setStretch(0, 9)
@@ -197,11 +200,11 @@ class MainWindow(QMainWindow):
         params_layout.addWidget(set_waveform_label, 1, 0)
 
         self.select_method = QComboBox()
-        self.select_method.addItems(["Lagrange", "Cubic Spline"])
-        self.select_method.currentTextChanged.connect(lambda: (
-            self.config.__setitem__("插值方法", self.select_method.currentText()),
-            self.waveform_area.update(),
-            self.waveform_area.points_changed.emit(),  # 发射信号触发插值函数重计算
+        self.select_method.addItems([InterpolationManager.get_name(method) for method in Interpolation])
+        self.select_method.currentTextChanged.connect(lambda t: (
+            self.config.__setitem__("插值方法", InterpolationManager.get_enum(t)),
+            self.waveform_modulator.update(),
+            self.waveform_modulator.calc_polynomial()
         ))
         params_layout.addWidget(self.select_method, 1, 1)
 
@@ -308,7 +311,7 @@ class MainWindow(QMainWindow):
         self.stop_button = QPushButton()
         self.stop_button.setText("停止")
         self.stop_button.setStyleSheet("QPushButton { height: 2.5em; } ")
-        # self.stop_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
+        self.stop_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
         motor_running_layout.addWidget(self.stop_button, 3, 0, 2, 2)
 
         motor_running_frame.setLayout(motor_running_layout)
@@ -384,9 +387,9 @@ class MainWindow(QMainWindow):
         self.mock_chart.addAxis(self.mock_axis_y, Qt.AlignmentFlag.AlignLeft)
 
         # 多项式页
-        self.formulas_area = FormulasDisplay(self.config)
-        self.formulas_area.status_message.connect(self.update_status)
-        multi_widget_area.addTab(self.formulas_area, "多项式")
+        self.latex_board = LatexBoard(self.config)
+        self.latex_board.status_message.connect(self.update_status)
+        multi_widget_area.addTab(self.latex_board, "多项式")
 
         lower_layout.addWidget(multi_widget_area)
         main_layout.addLayout(lower_layout)
@@ -420,7 +423,7 @@ class MainWindow(QMainWindow):
         #     self.client.write_registers(0, [1, 2, 3, 4, 5], slave=1)
         # else:
         #     QMessageBox.warning(self, "警告", "当前选中电机未启动！")
-        polynomial_object = self.formulas_area.polynomial_object
+        polynomial_object = self.latex_board.model
         if polynomial_object[0] == "Lagrange":
             packet = []
         elif polynomial_object[0] == "Cubic Spline":
@@ -436,14 +439,26 @@ class MainWindow(QMainWindow):
 
 
     @Slot()
-    def _update_rule_check_result_display(self, result: bool):
+    def update_waveform_status(self, status: WaveformStatus):
         """
-        更新规则检查结果功能实现
-        :param result: 规则检查结果
+        更新波形状态功能实现
+        :param status: 波形状态
         """
-        if result:
-            self.validity_display_area.setText("波形正常，可以执行！")
-            self.validity_display_area.setStyleSheet(
+        if status == WaveformStatus.Unset:
+            self.waveform_status_board.setText("当前未设置波形！")
+            self.waveform_status_board.setStyleSheet(
+                '''
+                background-color: orange;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                padding-top: 5px;
+                padding-bottom: 5px;
+                '''
+            )
+        elif status == WaveformStatus.Normal:
+            self.waveform_status_board.setText("波形正常，可以执行！")
+            self.waveform_status_board.setStyleSheet(
                 '''
                 background-color: green;
                 color: white;
@@ -453,9 +468,9 @@ class MainWindow(QMainWindow):
                 padding-bottom: 5px;
                 '''
             )
-        else:
-            self.validity_display_area.setText("波形异常，无法执行！")
-            self.validity_display_area.setStyleSheet(
+        elif status == WaveformStatus.Abnormal:
+            self.waveform_status_board.setText("波形异常，无法执行！")
+            self.waveform_status_board.setStyleSheet(
                 '''
                 background-color: red;
                 color: white;
@@ -465,6 +480,8 @@ class MainWindow(QMainWindow):
                 padding-bottom: 5px;
                 '''
             )
+        else:
+            raise ValueError("未知的波形状态！")
 
     @Slot()
     def _read_waveform_file(self):
@@ -486,12 +503,12 @@ class MainWindow(QMainWindow):
                 try:
                     with open(normalized_path, "rb") as file:
                         self.config.update(pickle.load(file))
-                        self.select_method.setCurrentText(self.config["插值方法"])
+                        self.select_method.setCurrentText(self.config["插值方法"].value)
                         self.set_offset.setValue(self.config["偏移量"])
                         self.set_frequency.setValue(self.config["频率"])
                         self.set_amplitude.setValue(self.config["幅值比例"])
-                        self.waveform_area.update()
-                        self.waveform_area.points_changed.emit()  # 发射信号触发公式绘制
+                        self.waveform_modulator.update()
+                        self.waveform_modulator.points_changed.emit()  # 发射信号触发公式绘制
                     self.update_status(f"成功从 {normalized_path} 读取波形数据！")
                 except Exception as e:
                     QMessageBox.critical(self, "警告", f"读取波形数据出错: {e}")
@@ -541,7 +558,7 @@ class MainWindow(QMainWindow):
         series = QLineSeries()
         period = int(self.mock_axis_x.max() * self.config.get("频率") + 1)
         for i in range(period):
-            for x, y in self.waveform_area.interpolated_points:
+            for x, y in self.waveform_modulator.interpolated_points:
                 # X坐标变换
                 processed_x = (x + i) / self.config.get("频率")
 
@@ -574,7 +591,7 @@ class MainWindow(QMainWindow):
 
                 try:
                     result = []
-                    for x, y in self.waveform_area.interpolated_points:
+                    for x, y in self.waveform_modulator.interpolated_points:
                         # X坐标变换
                         processed_x = x / self.config.get("频率")
 

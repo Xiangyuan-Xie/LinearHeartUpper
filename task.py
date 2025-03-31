@@ -1,7 +1,9 @@
 from typing import Sequence, Tuple, Any
 
 from PySide6.QtCore import QRunnable, QObject, Signal
-from scipy.interpolate import lagrange, CubicSpline
+from scipy.interpolate import CubicSpline, Akima1DInterpolator
+
+from common import Interpolation, InterpolationManager
 
 
 class TaskRunner(QRunnable):
@@ -14,44 +16,55 @@ class TaskRunner(QRunnable):
 
 
 class ExpressionTask(QObject):
-    result_ready = Signal(Any, str, str)
+    result = Signal(Any, str, str)
 
     def __init__(self, points: Sequence[Tuple[float, float]],
-                 offset: float, amplitude: float, method: str):
+                 offset: float, amplitude: float, method: Interpolation):
         super().__init__()
-        self.__slots__ = ('points', 'offset', 'amplitude', 'method')
-        self.points = sorted(points, key=lambda p: p[0]) if method == "Cubic Spline" else points
+        self.points = sorted(points, key=lambda p: p[0])
         self.offset = offset
         self.amplitude = amplitude
         self.method = method
 
     @staticmethod
-    def _generate_lagrange_latex(x_vals, y_vals):
+    def generate_akima_latex(x_vals, y_vals):
         """
-        生成拉格朗日插值多项式
+        生成Akima插值表达式
         """
-        poly = lagrange(x_vals, y_vals)
-        coeffs = poly.coeffs.tolist()
+        poly = Akima1DInterpolator(x_vals, y_vals)
+        case_exprs = []
+        breakpoints = poly.x
+        coefficients = poly.c.T
 
-        # 生成多项式项列表
-        terms = []
-        for i, c in enumerate(coeffs):
-            power = len(coeffs) - 1 - i
-            rc = round(c, 4)
-            if rc == 0 and len(coeffs) > 1: continue
+        for i in range(len(breakpoints) - 1):
+            xi = round(breakpoints[i], 3)
+            xi_next = round(breakpoints[i + 1], 3)
+            c3, c2, c1, c0 = (round(v, 4) for v in coefficients[i])
 
-            if power == 0:
-                terms.append(f"{rc}")
-            elif power == 1:
-                terms.append(f"{rc}t")
-            else:
-                terms.append(f"{rc}t^{power}")
+            terms = []
+            for expo, coef in enumerate([c3, c2, c1]):
+                if abs(coef) > 1e-6:  # 过滤微小系数
+                    power = 3 - expo
+                    exponent = f"^{power}" if power != 1 else ""
+                    base = (
+                        f"{coef}(t - {xi}){exponent}"
+                        if xi != 0
+                        else f"{coef}t{exponent}"
+                    )
+                    term = base.replace("-", " - ").replace("+ -", "- ")
+                    terms.append(term)
 
-        expr = " + ".join(terms).replace("+ -", " - ")
-        return poly, f"\\( {expr} \\)"
+            if abs(c0) > 1e-6 or not terms:
+                c0_str = f"{c0}".replace("-", " - ")
+                terms.append(c0_str.lstrip("+"))
+
+            expr = " + ".join(terms).replace("+  -", "- ")
+            case_exprs.append(f"{expr}  &\\text{{, }} {xi} \\leq t < {xi_next} \\\\")
+
+        return poly, "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
 
     @staticmethod
-    def _generate_cubic_spline_latex(x_vals, y_vals):
+    def generate_cubic_spline_latex(x_vals, y_vals):
         """
         生成三次样条表达式
         """
@@ -64,7 +77,6 @@ class ExpressionTask(QObject):
             xi_next = round(poly.x[i + 1], 3)
             c3, c2, c1, c0 = (round(v, 4) for v in poly.c[:, i])
 
-            # 处理负号显示问题
             terms = []
             if c3 != 0:
                 base = f"{c3}(t - {xi})^3" if xi != 0 else f"{c3}t^3"
@@ -83,30 +95,25 @@ class ExpressionTask(QObject):
 
             expr = " + ".join(terms).replace("+ -", "- ")
 
-            # 使用对齐语法替代 cases
-            case_exprs.append(
-                f"{expr} &\\text{{, }} {xi} \\leq t < {xi_next} \\\\"
-            )
+            case_exprs.append(f"{expr} &\\text{{, }} {xi} \\leq t < {xi_next} \\\\")
 
         return poly, "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
 
     def run(self):
-        assert len(self.points) >= 2, "插值点不满足小于2个！"
+        if len(self.points) <= 2:
+            self.result.emit(None, "", "")
+            return
 
         try:
-            if self.method == "Lagrange":
-                x_vals, y_vals = zip(*self.points)
-                poly, poly_latex = self._generate_lagrange_latex(x_vals, y_vals)
-            elif self.method == "Cubic Spline":
-                x_vals, y_vals = zip(*self.points)
-                if len(x_vals) == 2:  # 直线特例
-                    poly, poly_latex = self._generate_lagrange_latex(x_vals, y_vals)
-                else:
-                    poly, poly_latex = self._generate_cubic_spline_latex(x_vals, y_vals)
+            x_vals, y_vals = zip(*self.points)
+            if self.method == Interpolation.Akima:
+                poly, poly_latex = self.generate_akima_latex(x_vals, y_vals)
+            elif self.method == Interpolation.CubicSpline:
+                poly, poly_latex = self.generate_cubic_spline_latex(x_vals, y_vals)
             else:
-                raise ValueError("试图使用未定义的插值类型！")
+                raise ValueError("不支持的插值方法！")
 
-            self.result_ready.emit(poly, self.method, poly_latex)
+            self.result.emit(poly, poly_latex, f"{InterpolationManager.get_name(self.method)}插值方法计算完成！")
 
         except Exception as e:
-            self.result_ready.emit(("ERROR", str(e)))
+            self.result.emit(None, "", f"插值多项式计算过程中出错：{e}")

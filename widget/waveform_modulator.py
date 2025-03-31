@@ -1,22 +1,23 @@
-import re
-import time
-from threading import Thread
-from typing import Dict, Any, Optional, Sequence, Tuple
+import enum
+from typing import Dict, Any, Tuple, List
 
 import numpy as np
-from PySide6.QtCore import QThreadPool, Slot, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtGui import Qt, QPainter, QPen, QColor, QPainterPath, QBrush, QPixmap, QFont, QMouseEvent
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog, QGridLayout, QLabel, QLineEdit, QPushButton, QMessageBox
-from pymodbus.client import ModbusTcpClient
-from scipy.interpolate import lagrange, CubicSpline
+from PySide6.QtWidgets import QWidget
 
-from task import ExpressionTask, TaskRunner
+from common import Interpolation, InterpolationManager
 
 
-class WaveformArea(QWidget):
+class WaveformStatus(enum.Enum):
+    Unset = 0
+    Normal = 1
+    Abnormal = 2
+
+
+class WaveformModulator(QWidget):
     points_changed = Signal()
-    rule_check_result = Signal(bool)
+    waveform_status = Signal(WaveformStatus)
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
@@ -35,55 +36,23 @@ class WaveformArea(QWidget):
         :param y: 插值点Y坐标
         """
         self.config["插值点集"].append((x, y))
+        self.calc_polynomial()
 
     def remove_point(self):
         """
         用户移除插值点功能实现
         """
-        if len(self.config["插值点集"]) > 2:
-            self.config["插值点集"].pop()
+        if len(self.config["插值点集"]) <= 2:
+            return
 
-    def _interpolate(self, num_points: int=1000):
+        self.config["插值点集"].pop()
+        self.calc_polynomial()
+
+    def calc_polynomial(self):
         """
-        插值计算功能实现
-        :param num_points: 绘制插值曲线点的数量，默认为200
-        :return: list(zip(x_new, y_new))，每个元素代表一个插值点
+        启动多项式计算任务
         """
-        assert len(self.config["插值点集"]) >= 2, "插值点不满足小于2个！"
-
-        method = self.config.get("插值方法")
-
-        # 拉格朗日插值
-        if method == "Lagrange":
-            x_vals, y_vals = zip(*self.config["插值点集"])
-            poly = lagrange(x_vals, y_vals)
-            x_new = np.linspace(min(x_vals), max(x_vals), num_points)
-            y_new = poly(x_new)
-
-        # 三次样条插值
-        elif method == "Cubic Spline":
-            sorted_points = sorted(self.config["插值点集"], key=lambda p: p[0])
-            x_vals, y_vals = zip(*sorted_points)
-            poly = CubicSpline(x_vals, y_vals)
-            x_new = np.linspace(min(x_vals), max(x_vals), num_points)
-            y_new = poly(x_new)
-
-        # 未知插值方法
-        else:
-            raise ValueError("使用未定义的插值方法拟合曲线！")
-
-        self.interpolated_points = list(zip(x_new, y_new))
-        if self.dragging_point is None:
-            self._rule_check()
-
-    def _rule_check(self):
-        """
-        规则检查功能实现
-        """
-        if any(py > 1.0001 or py < -0.0001 for _, py in self.interpolated_points):
-            self.rule_check_result.emit(False)
-        else:
-            self.rule_check_result.emit(True)
+        self.points_changed.emit()
 
     def paintEvent(self, event):
         """
@@ -102,7 +71,7 @@ class WaveformArea(QWidget):
 
         # 绘制数据点
         for index, point in enumerate(self.config["插值点集"]):
-            # 跳过定点的绘制
+            # 跳过初始点的绘制
             if index < 2:
                 continue
 
@@ -122,10 +91,8 @@ class WaveformArea(QWidget):
             painter.drawRect(int(x) - square_size // 2, int(y) - square_size // 2, square_size, square_size)
 
         # 绘制插值曲线
-        if len(self.config["插值点集"]) > 1:
-            # 计算插值曲线点集
-            self._interpolate()
-
+        if len(self.config["插值点集"]) > 2:
+            self.interpolated_points = self.interpolate(self.config["插值方法"], self.config["插值点集"])  # 计算插值曲线点集
             if self.interpolated_points:
                 painter.setPen(QPen(QColor(0, 0, 255), 2))  # 蓝色
 
@@ -143,7 +110,42 @@ class WaveformArea(QWidget):
                 painter.setBrush(QBrush())  # 不填充路径区域
                 painter.drawPath(path)
 
+        # 更新波形状态
+        self.update_waveform_status()
+
         painter.end()
+
+    @staticmethod
+    def interpolate(method: Interpolation, points: List[Tuple[float, float]],
+                    num_points: int=1000) -> List[Tuple[float, float]]:
+        """
+        插值计算功能实现
+        :param method: 插值方法
+        :param points: 插值点集合
+        :param num_points: 绘制插值曲线点的数量，默认为1000
+        :return: list(zip(x_new, y_new))，每个元素代表一个插值点
+        """
+        assert len(points) > 2, "插值点数量不满足大于2个！"
+
+        sorted_points = sorted(points, key=lambda p: p[0])
+        x_vals, y_vals = zip(*sorted_points)
+        poly = InterpolationManager.get_class(method)(x_vals, y_vals)
+        x_new = np.linspace(min(x_vals), max(x_vals), num_points)
+        y_new = poly(x_new)
+
+        return list(zip(x_new, y_new))
+
+    def update_waveform_status(self):
+        """
+        更新波形状态功能实现
+        """
+        if len(self.config["插值点集"]) <= 2:
+            self.waveform_status.emit(WaveformStatus.Unset)
+        else:
+            if any(py > 1.0001 or py < -0.0001 for _, py in self.interpolated_points):
+                self.waveform_status.emit(WaveformStatus.Abnormal)
+            else:
+                self.waveform_status.emit(WaveformStatus.Normal)
 
     def _update_static_cache(self):
         """
@@ -223,7 +225,6 @@ class WaveformArea(QWidget):
                 # 若存在正在拖动的点则退出拖动状态
                 if self.dragging_point is not None:
                     self.dragging_point = None
-                    self.points_changed.emit()
 
                 # 不存在正在拖动的点
                 else:
@@ -247,7 +248,6 @@ class WaveformArea(QWidget):
                         mx = (x / (self.width() - 100)) * self.x_range
                         my = (y / (self.height() - 100)) * self.y_range
                         self.add_point(mx, my)
-                        self.points_changed.emit()
 
                 # 更新控件显示
                 self.update()
@@ -257,7 +257,6 @@ class WaveformArea(QWidget):
             if len(self.config["插值点集"]) > 2:
                 self.remove_point()
                 self.update()
-                self.points_changed.emit()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         """
@@ -276,123 +275,4 @@ class WaveformArea(QWidget):
                 # 更新点的位置
                 self.config["插值点集"][self.dragging_point] = (scaled_x, scaled_y)
                 self.update()
-
-
-class FormulasDisplay(QWidget):
-    status_message = Signal(str)
-    thread_pool = QThreadPool().globalInstance()
-
-    def __init__(self, config: Dict[str, Any]):
-        super().__init__()
-        self.config = config
-        self.polynomial_object = None
-        self.html_content_forward = r'''
-            <!DOCTYPE html>
-            <html lang="en">
-                <head>
-                    <script id="MathJax-script" async src="http://localhost:5000/MathJax/es5/tex-mml-chtml.js"></script>
-                    <style>
-                        p {
-                            text-align:center;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <p>
-        '''
-        self.html_content_backward = r'''
-                    </p>
-                </body>
-            </html>
-        '''
-
-        layout = QVBoxLayout()
-
-        # 浏览器
-        self.webview = QWebEngineView()
-        self.webview.setHtml(self.html_content_forward + self.html_content_backward)
-        layout.addWidget(self.webview)
-
-        self.setLayout(layout)
-
-    @Slot(list)
-    def create_polynomial_task(self, points: Sequence[Tuple[float, float]]):
-        """
-        新建多项式计算任务功能实现
-        :param points: 插值点集
-        """
-        task = ExpressionTask(points, self.config.get("偏移量"), self.config.get("赋值"), self.config.get("插值方法"))
-        task.result_ready.connect(self._on_polynomial_result_ready)
-        self.thread_pool.start(TaskRunner(task))
-
-    @Slot(Any, str, str)
-    def _on_polynomial_result_ready(self, polynomial_object, method: str, result: str):
-        """
-        插值多项式计算结果显示功能实现
-        :param polynomial_object: 多项式对象
-        :param method: 多项式插值方法
-        :param result: 多项式计算结果
-        """
-        self.polynomial_object = (method, polynomial_object)
-
-        html_context = self.html_content_forward + result + self.html_content_backward
-        self.webview.setHtml(html_context)
-
-        self.status_message.emit(f"{method}插值方法计算完成！")
-
-
-class ConnectDialog(QDialog):
-    status_message = Signal(str)
-    connection_info = Signal(str, int)
-
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("设置")
-
-        layout = QGridLayout()
-
-        host_label = QLabel("IP地址：")
-        host_label.setFixedWidth(60)
-        layout.addWidget(host_label, 1, 0)
-
-        self.host = QLineEdit("127.0.0.1")
-        self.host.setFixedWidth(110)
-        layout.addWidget(self.host, 1, 1)
-
-        port_label = QLabel("端口：")
-        port_label.setFixedWidth(60)
-        layout.addWidget(port_label, 2, 0)
-
-        self.port = QLineEdit("502")
-        self.port.setFixedWidth(110)
-        layout.addWidget(self.port, 2, 1)
-
-        self.communication_button = QPushButton("连接")
-        self.communication_button.clicked.connect(self._connect_plc)
-        layout.addWidget(self.communication_button, 3, 0, 1, 2)
-
-        self.setLayout(layout)
-
-    @Slot()
-    def _connect_plc(self):
-        """
-        连接PLC功能实现
-        """
-        # IPv4规则检查
-        host_pattern = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
-        if not bool(re.match(host_pattern, self.host.text())):
-            QMessageBox.warning(self, "警告", "请检查当前设置IP地址是否有效！")
-            return
-
-        # 端口规则检查
-        port_pattern = r'^([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$'
-        if not bool(re.match(port_pattern, self.port.text())):
-            QMessageBox.warning(self, "警告", "请检查当前设置端口是否有效！")
-            return
-
-        host = self.host.text()
-        port = int(self.port.text())
-        self.status_message.emit(f"正在连接PLC（{host}:{port}），请等待！")
-        self.connection_info.emit(host, port)
-
-        self.accept()
+                self.calc_polynomial()
