@@ -17,8 +17,8 @@ from flask import Flask
 from flask_cors import CORS
 from pymodbus.client import ModbusTcpClient
 
-from common import Interpolation, InterpolationManager
-from communication import interval_encode, SplineCoefficientCompressor
+from common import Interpolation, InterpolationManager, RegisterAddress
+from communication import float_to_fixed, split_array
 from widget.dialog.connect_plc import ConnectDialog
 from widget.latex_board import LatexBoard
 from widget.waveform_modulator import WaveformModulator, WaveformStatus
@@ -32,17 +32,17 @@ class MainWindow(QMainWindow):
             "插值点集": [(0.0, 0.0), (1.0, 0.0)],
             "偏移量": 0.0,
             "频率": 1.0,
-            "幅值比例": 100,
+            "幅值比例": 1.0,
             "波形状态": WaveformStatus.Unset,
         }
         self.motor_pool = {
             "1号电机": {
                 "导轨长度": 100.0,
+                "运行状态": False,
             }
         }
         self.client: Optional[ModbusTcpClient] = None
         self.thread_pool = QThreadPool.globalInstance()
-        # self.compressor = SplineCoefficientCompressor()
 
         # MathJax服务器
         server = Flask(__name__, static_folder="./MathJax")
@@ -202,7 +202,7 @@ class MainWindow(QMainWindow):
         self.select_method = QComboBox()
         self.select_method.addItems([InterpolationManager.get_name(method) for method in Interpolation])
         self.select_method.currentTextChanged.connect(lambda t: (
-            self.config.__setitem__("插值方法", InterpolationManager.get_enum(t)),
+            self.config.__setitem__("插值方法", Interpolation[t]),
             self.waveform_modulator.update(),
             self.waveform_modulator.calc_polynomial()
         ))
@@ -235,10 +235,10 @@ class MainWindow(QMainWindow):
         self.set_amplitude = QSpinBox()
         self.set_amplitude.setRange(0, 1000)
         self.set_amplitude.setSingleStep(1)
-        self.set_amplitude.setValue(self.config.get("幅值比例"))
+        self.set_amplitude.setValue(int(self.config.get("幅值比例") * 100))
         self.set_amplitude.setSuffix(" %")
         self.set_amplitude.valueChanged.connect(lambda: (
-            self.config.__setitem__("幅值比例", self.set_amplitude.value()),
+            self.config.__setitem__("幅值比例", float(self.set_amplitude.value()) / 100),
             self._update_mock_waveform_display(),
         ))
         params_layout.addWidget(QLabel("幅值比例："), 4, 0, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -305,13 +305,13 @@ class MainWindow(QMainWindow):
         self.start_button = QPushButton()
         self.start_button.setText("开始")
         self.start_button.setStyleSheet("QPushButton { height: 2.5em; } ")
-        self.start_button.clicked.connect(self.send_data)
+        self.start_button.clicked.connect(self.run_motor)
         motor_running_layout.addWidget(self.start_button, 1, 0, 2, 2)
 
         self.stop_button = QPushButton()
         self.stop_button.setText("停止")
         self.stop_button.setStyleSheet("QPushButton { height: 2.5em; } ")
-        self.stop_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
+        self.stop_button.clicked.connect(self.stop_motor)
         motor_running_layout.addWidget(self.stop_button, 3, 0, 2, 2)
 
         motor_running_frame.setLayout(motor_running_layout)
@@ -409,34 +409,59 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"{current_time}: {text}", 0)
 
     @Slot()
-    def send_data(self):
+    def run_motor(self):
         """
-        波形数据发送功能实现
+        电机运行开始功能实现
         """
-        # if not self.config.get("规则检查结果"):
-        #     QMessageBox.warning(self, "警告", "波形异常，无法设置参数，请检查！")
-        #     return
-        #
-        # QMessageBox.warning(self, "警告", "当前选中电机未启动！")
-        # self.update_status("电机运行参数设置成功！")
-        # if self.client is not None and self.client.is_socket_open():
-        #     self.client.write_registers(0, [1, 2, 3, 4, 5], slave=1)
-        # else:
-        #     QMessageBox.warning(self, "警告", "当前选中电机未启动！")
-        polynomial_object = self.latex_board.model
-        if polynomial_object[0] == "Lagrange":
-            packet = []
-        elif polynomial_object[0] == "Cubic Spline":
-            encoded_interval_matrix = interval_encode(polynomial_object[1].x[:-1], polynomial_object[1].x[1:])
-            encoded_coefficient_matrix = self.compressor.compress(polynomial_object[1].c.T)
-            packet = np.concatenate(np.column_stack([encoded_interval_matrix, encoded_coefficient_matrix]))
-        else:
-            raise ValueError("试图使用未定义的插值类型！")
+        if self.client is None or not self.client.connect() or not self.client.is_socket_open():
+            QMessageBox.critical(self, "错误", "当前通讯异常，无法发送数据！")
+            return
 
-        print(packet)
+        if self.config.get("波形状态") == WaveformStatus.Abnormal:
+            QMessageBox.critical(self, "错误", "波形异常，无法设置参数，请检查！")
+            return
+        elif self.config.get("波形状态") == WaveformStatus.Unset:
+            QMessageBox.critical(self, "错误", "当前未设置波形，请先设置波形！")
+            return
 
-        self.client.write_registers(0, packet, slave=1)
+        model = self.latex_board.model
 
+        coefficient_matrix = model.c.T
+        coefficient_matrix *= self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 转换真实坐标
+        coefficient_matrix *= self.config["幅值比例"]  # 增幅
+        coefficient_matrix[:, 3] += self.config["偏移量"]
+        print(coefficient_matrix)
+
+        packet = float_to_fixed(np.column_stack([model.x[:-1], coefficient_matrix]).flatten())
+
+        # 系数
+        address = RegisterAddress.Coefficient
+        split_packet = split_array(packet)
+        for sub_packet in split_packet:
+            response = self.client.write_registers(address, sub_packet)
+            if response is None:
+                print("写入失败（无响应）")
+            elif response.isError():
+                print(f"服务器返回错误：{response}")
+            else:
+                print(f"写入成功")
+            address += len(sub_packet)
+
+        # 状态和长度
+        length = len(model.x) - 1
+        self.client.write_registers(RegisterAddress.Status, [1, length])
+
+        self.update_status("运行参数设置成功，电机开始运行！")
+
+    @Slot()
+    def stop_motor(self):
+        if self.client is None or not self.client.connect() or not self.client.is_socket_open():
+            QMessageBox.critical(self, "错误", "当前通讯异常，无法发送数据！")
+            return
+
+        self.client.write_registers(RegisterAddress.Status, [0])
+
+        self.update_status("电机停止运行！")
 
     @Slot()
     def update_waveform_status(self, status: WaveformStatus):
@@ -506,13 +531,12 @@ class MainWindow(QMainWindow):
                         self.select_method.setCurrentText(self.config["插值方法"].value)
                         self.set_offset.setValue(self.config["偏移量"])
                         self.set_frequency.setValue(self.config["频率"])
-                        self.set_amplitude.setValue(self.config["幅值比例"])
+                        self.set_amplitude.setValue(int(self.config["幅值比例"] * 100))
                         self.waveform_modulator.update()
                         self.waveform_modulator.points_changed.emit()  # 发射信号触发公式绘制
                     self.update_status(f"成功从 {normalized_path} 读取波形数据！")
                 except Exception as e:
                     QMessageBox.critical(self, "警告", f"读取波形数据出错: {e}")
-
 
     @Slot()
     def _save_waveform_file(self):
@@ -537,7 +561,6 @@ class MainWindow(QMainWindow):
                     self.update_status(f"保存波形数据到 {normalized_path} ！")
                 except Exception as e:
                     QMessageBox.critical(self, "错误", f"保存波形数据时出错: {e}")
-
 
     @Slot()
     def _open_dialog(self):
@@ -564,7 +587,7 @@ class MainWindow(QMainWindow):
 
                 # Y坐标变换
                 absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
-                processed_y = (absolute_y * self.config.get("幅值比例") / 100.0) + self.config.get("偏移量")  # 偏移和增幅
+                processed_y = (absolute_y * self.config.get("幅值比例")) + self.config.get("偏移量")  # 偏移和增幅
                 if (self.mock_axis_x.min() <= processed_x <= self.mock_axis_x.max()
                         and self.mock_axis_y.min() <= processed_y <= self.mock_axis_y.max()):
                     series.append(processed_x, processed_y)
@@ -597,7 +620,7 @@ class MainWindow(QMainWindow):
 
                         # Y坐标变换
                         absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
-                        processed_y = (absolute_y * self.config.get("幅值比例") / 100.0) + self.config.get("偏移量")  # 偏移和增幅
+                        processed_y = (absolute_y * self.config.get("幅值比例")) + self.config.get("偏移量")  # 偏移和增幅
 
                         result.append(
                             (processed_x, max(self.mock_axis_y.min(), min(processed_y, self.mock_axis_y.max()))))

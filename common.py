@@ -19,15 +19,6 @@ class InterpolationManager:
             raise ValueError("未知的插值方法！")
 
     @staticmethod
-    def get_enum(name: str):
-        if name == "Akima":
-            return Interpolation.Akima
-        elif name == "CubicSpline":
-            return Interpolation.CubicSpline
-        else:
-            raise ValueError("未知的插值方法！")
-
-    @staticmethod
     def get_class(type: Interpolation | str):
         if type == Interpolation.Akima or type == "Akima":
             return Akima1DInterpolator
@@ -35,3 +26,9 @@ class InterpolationManager:
             return CubicSpline
         else:
             raise ValueError("未知的插值方法！")
+
+
+class RegisterAddress:
+    Status = 0x2000
+    Length = 0x2001
+    Coefficient = 0x2002

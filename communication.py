@@ -112,20 +112,6 @@ class SplineCoefficientCompressor:
         return self._mu_law_expand(y)
 
 
-def get_method_index(method_name: str) -> int:
-    """
-    获取插值方法的索引
-    :param method_name: 插值方法名称
-    :return: 插值方法索引
-    """
-    if method_name == "Lagrange":
-        return 0
-    elif method_name == "Cubic Spline":
-        return 1
-    else:
-        raise ValueError("试图通过不支持的插值方法获取索引！")
-
-
 def unsigned_combine(a: int, b: int) -> int:
     """
     将两个无符号整数拼接为16位二进制数
@@ -135,3 +121,95 @@ def unsigned_combine(a: int, b: int) -> int:
     """
     assert 0 <= a <= 15 and 0 <= b <= 4095, "尝试拼接不符合范围的两个整数！"
     return (a << 12) | b
+
+
+def float_to_fixed(arr: np.ndarray, frac_bits: int = 16, byte_order: str = '>') -> np.ndarray:
+    """
+    批量将浮点数转换为Q格式定点数并拆分为高/低16位
+    :param arr: 目标浮点数组，shape=(1,N)
+    :param frac_bits: 小数部分位数
+    :param byte_order: 端序
+    :return: 拆分为高/低16位的定点数组，shape=(1,2N)
+    """
+    assert byte_order in ('>', '<'), "无效的端序！"
+
+    # 计算缩放因子和取值范围
+    scale = 1 << frac_bits
+    max_val = (1 << (31 - frac_bits)) - (1.0 / scale)
+    min_val = - (1 << (31 - frac_bits))
+
+    # 饱和处理
+    arr = np.clip(arr, min_val, max_val)
+
+    # 转换为Q格式定点数
+    scaled = (arr * scale).astype(np.int32)
+
+    # 分离高低位
+    high_bits = (scaled >> 16).astype(np.uint16)  # 取高16位
+    low_bits = (scaled & 0xFFFF).astype(np.uint16)  # 取低16位
+
+    # 创建交替数组
+    result = np.empty(2 * len(arr), dtype=np.uint16)
+    if byte_order == '<':
+        result[0::2] = low_bits
+        result[1::2] = high_bits
+    else:
+        result[0::2] = high_bits
+        result[1::2] = low_bits
+
+    return result
+
+
+def fixed_to_float(arr: np.ndarray, frac_bits: int = 16, byte_order: str = '>') -> np.ndarray:
+    """
+    将高/低16位交替的定点数组还原为浮点数组
+    :param arr: 包含高低位的定点数组，shape=(1,2N)
+    :param frac_bits: 小数部分位数
+    :param byte_order: 端序
+    :return: 还原后的浮点数组，shape=(1,N)
+    """
+    # 验证参数合法性
+    assert byte_order in ('>', '<'), "无效的端序！"
+    assert arr.size % 2 == 0, "输入数组长度必须为偶数"
+
+    # 展平处理以简化索引操作
+    flattened = arr.ravel()
+
+    # 分离高低位数据
+    if byte_order == '>':
+        high_bits = flattened[0::2].astype(np.uint32)  # 大端序：高位在前
+        low_bits = flattened[1::2].astype(np.uint32)
+    else:
+        high_bits = flattened[1::2].astype(np.uint32)  # 小端序：高位在后
+        low_bits = flattened[0::2].astype(np.uint32)
+
+        # 合并32位整数
+    combined = (high_bits << 16) | low_bits
+
+    # 转换回有符号整数
+    fixed_point = combined.astype(np.int32)
+
+    # 计算缩放因子
+    scale = 1 << frac_bits
+
+    return fixed_point.astype(np.float64) / scale
+
+
+def split_array(arr: np.ndarray, max_length: int=120):
+    """
+    分割数组
+    :param arr:  编码后的一维数据包
+    :param max_length: 每个列表的最大长度（默认120）
+    :return 二维列表
+    """
+    # 计算需要分割的块数
+    n = len(arr)
+    num_chunks = (n + max_length - 1) // max_length  # 向上取整
+
+    # 按顺序分割为子列表
+    chunks = [
+        arr[i * max_length: (i + 1) * max_length].tolist()
+        for i in range(num_chunks)
+    ]
+
+    return chunks
