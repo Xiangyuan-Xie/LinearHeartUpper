@@ -1,6 +1,8 @@
-from typing import Tuple
+from typing import Tuple, Optional
 
 import numpy as np
+from pymodbus.client import ModbusTcpClient
+from pymodbus.pdu import ModbusPDU
 
 
 def interval_encode(a_array: np.ndarray, b_array: np.ndarray) -> np.ndarray:
@@ -213,3 +215,17 @@ def split_array(arr: np.ndarray, max_length: int=120):
     ]
 
     return chunks
+
+
+def process_response(response: ModbusPDU):
+    """
+    处理ModbusTCP协议的响应
+    :param response: ModbusPDU包
+    :return: 
+    """
+    if response is None:
+        print("写入失败（无响应）")
+    elif response.isError():
+        print(f"服务器返回错误：{response}")
+    else:
+        print(f"写入成功")

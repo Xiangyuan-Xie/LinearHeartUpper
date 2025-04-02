@@ -12,15 +12,16 @@ from PySide6.QtCore import Qt, QPointF, QThreadPool, Slot, QDir
 from PySide6.QtGui import QAction, QPainter
 from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
                                QTabWidget, QMenuBar, QMenu, QFileDialog, QSpinBox, QVBoxLayout, QWidget, QLabel,
-                               QGridLayout, QPushButton, QMessageBox)
+                               QGridLayout, QPushButton, QMessageBox, QLineEdit)
 from flask import Flask
 from flask_cors import CORS
 from pymodbus.client import ModbusTcpClient
 
 from common import Interpolation, InterpolationManager, RegisterAddress
-from communication import float_to_fixed, split_array
+from communication import float_to_fixed, split_array, process_response
 from widget.dialog.connect_plc import ConnectDialog
 from widget.latex_board import LatexBoard
+from widget.status_light import StatusLight
 from widget.waveform_modulator import WaveformModulator, WaveformStatus
 
 
@@ -34,11 +35,13 @@ class MainWindow(QMainWindow):
             "频率": 1.0,
             "幅值比例": 1.0,
             "波形状态": WaveformStatus.Unset,
+            "当前电机": "1号电机"
         }
         self.motor_pool = {
             "1号电机": {
                 "导轨长度": 100.0,
                 "运行状态": False,
+                "电机描述": "ABB",
             }
         }
         self.client: Optional[ModbusTcpClient] = None
@@ -108,7 +111,7 @@ class MainWindow(QMainWindow):
         self.waveform_modulator = WaveformModulator(self.config)
         self.waveform_modulator.points_changed.connect(lambda: (
             self.latex_board.create_polynomial_task(self.config["插值点集"]),
-            self.update_status(f"正在使用{InterpolationManager.get_name(self.config.get('插值方法'))}插值法进行计算！"),
+            self.update_status(f"正在使用{InterpolationManager.get_name(self.config["插值方法"])}插值法进行计算！"),
         ))
         self.waveform_modulator.waveform_status.connect(lambda status: (
             self.config.__setitem__("波形状态", status),
@@ -120,7 +123,7 @@ class MainWindow(QMainWindow):
         # 波形状态区域
         self.waveform_status_board = QLabel()
         self.waveform_status_board.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.update_waveform_status(self.config.get("波形状态"))
+        self.update_waveform_status(self.config["波形状态"])
         left_layout.addWidget(self.waveform_status_board)
 
         # 左布局缩放因子
@@ -141,17 +144,29 @@ class MainWindow(QMainWindow):
         motor_setting_label = QLabel("<h3>电机设置</h3>")
         motor_setting_layout.addWidget(motor_setting_label, 0, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        select_motor_label = QLabel("选择电机：")
-        select_motor_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        motor_setting_layout.addWidget(select_motor_label, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        motor_selection_label = QLabel("选择电机：")
+        motor_selection_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(motor_selection_label, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.motor_selection = QComboBox()
-        self.motor_selection.addItems([motor for motor, _ in self.motor_pool.items()])
-        motor_setting_layout.addWidget(self.motor_selection, 1, 1)
+        self.motor_selection_box = QComboBox()
+        self.motor_selection_box.addItems(list(self.motor_pool.keys()))
+        self.motor_selection_box.currentTextChanged.connect(lambda name: (
+            self.config.__setitem__("当前电机", name)
+        ))
+        motor_setting_layout.addWidget(self.motor_selection_box, 1, 1)
+
+        motor_description_label = QLabel("电机描述：")
+        motor_description_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(motor_description_label, 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.motor_description = QLineEdit()
+        self.motor_description.setReadOnly(True)
+        self.motor_description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(self.motor_description, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
         rail_length_label = QLabel("导轨长度：")
         rail_length_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        motor_setting_layout.addWidget(rail_length_label, 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(rail_length_label, 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.rail_length = QDoubleSpinBox()
         self.rail_length.setRange(0, 1000)
@@ -159,28 +174,12 @@ class MainWindow(QMainWindow):
         self.rail_length.setSingleStep(0.1)
         self.rail_length.setValue(100)
         self.rail_length.setSuffix(" mm")
-        self.rail_length.valueChanged.connect(lambda: (
-            self.motor_pool.get(self.motor_selection.currentText()).__setitem__("导轨长度", self.rail_length.value()),
-            self.set_offset.setMaximum(self.rail_length.value()),
-            self.mock_axis_y.setRange(0, self.rail_length.value()),
+        self.rail_length.valueChanged.connect(lambda length: (
+            self.motor_pool[self.config["当前电机"]].__setitem__("导轨长度", length),
+            self.set_offset.setMaximum(length),
+            self.mock_axis_y.setRange(0, length),
         ))
-        motor_setting_layout.addWidget(self.rail_length, 2, 1)
-
-        preview_duration_label = QLabel("预览时长：")
-        preview_duration_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        motor_setting_layout.addWidget(preview_duration_label, 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        self.preview_duration = QDoubleSpinBox()
-        self.preview_duration.setRange(0, 100)
-        self.preview_duration.setDecimals(1)
-        self.preview_duration.setSingleStep(0.1)
-        self.preview_duration.setValue(1.0)
-        self.preview_duration.setSuffix(" s")
-        self.preview_duration.valueChanged.connect(lambda: (
-            self.mock_axis_x.setRange(0, self.preview_duration.value()),
-            self._update_mock_waveform_display(),
-        ))
-        motor_setting_layout.addWidget(self.preview_duration, 3, 1)
+        motor_setting_layout.addWidget(self.rail_length, 3, 1)
 
         motor_setting_frame.setLayout(motor_setting_layout)
         middle_layout.addWidget(motor_setting_frame)
@@ -199,23 +198,23 @@ class MainWindow(QMainWindow):
         set_waveform_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         params_layout.addWidget(set_waveform_label, 1, 0)
 
-        self.select_method = QComboBox()
-        self.select_method.addItems([InterpolationManager.get_name(method) for method in Interpolation])
-        self.select_method.currentTextChanged.connect(lambda t: (
-            self.config.__setitem__("插值方法", Interpolation[t]),
+        self.method_selection = QComboBox()
+        self.method_selection.addItems([InterpolationManager.get_name(method) for method in Interpolation])
+        self.method_selection.currentTextChanged.connect(lambda text: (
+            self.config.__setitem__("插值方法", Interpolation[text]),
             self.waveform_modulator.update(),
             self.waveform_modulator.calc_polynomial()
         ))
-        params_layout.addWidget(self.select_method, 1, 1)
+        params_layout.addWidget(self.method_selection, 1, 1)
 
         self.set_offset = QDoubleSpinBox()
-        self.set_offset.setRange(0, self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度"))
+        self.set_offset.setRange(0, self.motor_pool[self.config["当前电机"]]["导轨长度"])
         self.set_offset.setDecimals(1)
         self.set_offset.setSingleStep(0.1)
-        self.set_offset.setValue(self.config.get("偏移量"))
+        self.set_offset.setValue(self.config["偏移量"])
         self.set_offset.setSuffix(" mm")
-        self.set_offset.valueChanged.connect(lambda: (
-            self.config.__setitem__("偏移量", self.set_offset.value()),
+        self.set_offset.valueChanged.connect(lambda value: (
+            self.config.__setitem__("偏移量", value),
             self._update_mock_waveform_display(),
         ))
         params_layout.addWidget(QLabel("偏移量："), 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -223,10 +222,10 @@ class MainWindow(QMainWindow):
 
         self.set_frequency = QDoubleSpinBox()
         self.set_frequency.setSingleStep(0.01)
-        self.set_frequency.setValue(self.config.get("频率"))
+        self.set_frequency.setValue(self.config["频率"])
         self.set_frequency.setSuffix(" Hz")
-        self.set_frequency.valueChanged.connect(lambda: (
-            self.config.__setitem__("频率", self.set_frequency.value()),
+        self.set_frequency.valueChanged.connect(lambda value: (
+            self.config.__setitem__("频率", value),
             self._update_mock_waveform_display(),
         ))
         params_layout.addWidget(QLabel("频率："), 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -235,10 +234,10 @@ class MainWindow(QMainWindow):
         self.set_amplitude = QSpinBox()
         self.set_amplitude.setRange(0, 1000)
         self.set_amplitude.setSingleStep(1)
-        self.set_amplitude.setValue(int(self.config.get("幅值比例") * 100))
+        self.set_amplitude.setValue(int(self.config["幅值比例"] * 100))
         self.set_amplitude.setSuffix(" %")
-        self.set_amplitude.valueChanged.connect(lambda: (
-            self.config.__setitem__("幅值比例", float(self.set_amplitude.value()) / 100),
+        self.set_amplitude.valueChanged.connect(lambda value: (
+            self.config.__setitem__("幅值比例", float(value) / 100),
             self._update_mock_waveform_display(),
         ))
         params_layout.addWidget(QLabel("幅值比例："), 4, 0, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -262,20 +261,20 @@ class MainWindow(QMainWindow):
         motor_init_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_init_layout.addWidget(motor_init_label, 0, 0, 1, 2)
 
-        self.status_light = QLabel()
-        self.status_light.setFixedSize(20, 20)
-        self.status_light.setStyleSheet("background-color: red; border-radius: 10px;")
-        motor_init_layout.addWidget(self.status_light, 1, 0, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.motor_power_light = StatusLight()
+        motor_init_layout.addWidget(self.motor_power_light, 1, 0, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.activate_button = QPushButton()
-        self.activate_button.setText("启动")
-        self.activate_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前未连接电机！"))
-        motor_init_layout.addWidget(self.activate_button, 1, 1)
+        self.power_button = QPushButton()
+        self.power_button.setText("启动")
+        self.power_button.clicked.connect(lambda : (
+            self.power_on_motor() if self.power_button.text() == "启动" else self.power_off_motor()
+        ))
+        motor_init_layout.addWidget(self.power_button, 1, 1)
 
-        self.localization_button = QPushButton()
-        self.localization_button.setText("复位")
-        self.localization_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
-        motor_init_layout.addWidget(self.localization_button, 2, 1)
+        self.reset_button = QPushButton()
+        self.reset_button.setText("复位")
+        self.reset_button.clicked.connect(lambda: QMessageBox.warning(self, "警告", "当前选中电机未启动！"))
+        motor_init_layout.addWidget(self.reset_button, 2, 1)
 
         self.move_to_button = QPushButton()
         self.move_to_button.setText("移动至")
@@ -302,17 +301,41 @@ class MainWindow(QMainWindow):
         motor_running_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_running_layout.addWidget(motor_running_label, 0, 0, 1, 2)
 
-        self.start_button = QPushButton()
-        self.start_button.setText("开始")
-        self.start_button.setStyleSheet("QPushButton { height: 2.5em; } ")
-        self.start_button.clicked.connect(self.run_motor)
-        motor_running_layout.addWidget(self.start_button, 1, 0, 2, 2)
+        simulated_length_label = QLabel("模拟时长：")
+        simulated_length_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_running_layout.addWidget(simulated_length_label, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.stop_button = QPushButton()
-        self.stop_button.setText("停止")
-        self.stop_button.setStyleSheet("QPushButton { height: 2.5em; } ")
-        self.stop_button.clicked.connect(self.stop_motor)
-        motor_running_layout.addWidget(self.stop_button, 3, 0, 2, 2)
+        self.simulated_length = QDoubleSpinBox()
+        self.simulated_length.setRange(0, 100)
+        self.simulated_length.setDecimals(1)
+        self.simulated_length.setSingleStep(0.1)
+        self.simulated_length.setValue(1.0)
+        self.simulated_length.setSuffix(" s")
+        self.simulated_length.valueChanged.connect(lambda value: (
+            self.mock_axis_x.setRange(0, value),
+            self._update_mock_waveform_display(),
+        ))
+        motor_running_layout.addWidget(self.simulated_length, 1, 1)
+
+        feedback_length_label = QLabel("反馈时长：")
+        feedback_length_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_running_layout.addWidget(feedback_length_label, 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.feedback_length = QSpinBox()
+        self.feedback_length.setRange(0, 10000)
+        self.feedback_length.setValue(1000)
+        self.feedback_length.setSuffix(" 点")
+        # self.feedback_length.valueChanged.connect(lambda value: (
+        #     self.mock_axis_x.setRange(0, value),
+        #     self._update_mock_waveform_display(),
+        # ))
+        motor_running_layout.addWidget(self.feedback_length, 2, 1)
+
+        self.start_end_button = QPushButton()
+        self.start_end_button.setText("开始")
+        self.start_end_button.setStyleSheet("QPushButton { height: 2.5em; } ")
+        self.start_end_button.clicked.connect(self.run_motor)
+        motor_running_layout.addWidget(self.start_end_button, 3, 0, 2, 2)
 
         motor_running_frame.setLayout(motor_running_layout)
         right_layout.addWidget(motor_running_frame)
@@ -379,8 +402,7 @@ class MainWindow(QMainWindow):
         self.mock_axis_x = QValueAxis()
         self.mock_axis_y = QValueAxis()
         self.mock_axis_x.setRange(0, 1)  # X轴范围
-        self.mock_axis_y.setRange(0,
-                                  self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度"))  # Y轴范围
+        self.mock_axis_y.setRange(0, self.motor_pool[self.config["当前电机"]]["导轨长度"])  # Y轴范围
         self.mock_axis_x.setTickCount(24)  # X轴刻度线数量
         self.mock_axis_y.setTickCount(9)  # Y轴刻度线数量
         self.mock_chart.addAxis(self.mock_axis_x, Qt.AlignmentFlag.AlignBottom)
@@ -408,13 +430,46 @@ class MainWindow(QMainWindow):
         current_time = datetime.now().strftime("%H:%M:%S")
         self.status_bar.showMessage(f"{current_time}: {text}", 0)
 
+    def reset_motor(self):
+        """
+        电机复位
+        :return:
+        """
+
+    @Slot()
+    def power_on_motor(self):
+        """
+        电机上电
+        """
+        if not self.check_client():
+            return
+
+        process_response(self.client.write_register(RegisterAddress.Power, 1))
+
+        self.motor_pool[self.config["当前电机"]]["运行状态"] = True
+        self.motor_power_light.set_color("green")
+        self.power_button.setText("停止")
+
+    @Slot()
+    def power_off_motor(self):
+        """
+        电机下电
+        """
+        if not self.check_client():
+            return
+
+        process_response(self.client.write_register(RegisterAddress.Power, 0))
+
+        self.motor_pool[self.config["当前电机"]]["运行状态"] = False
+        self.motor_power_light.set_color("red")
+        self.power_button.setText("启动")
+
     @Slot()
     def run_motor(self):
         """
         电机运行开始功能实现
         """
-        if self.client is None or not self.client.connect() or not self.client.is_socket_open():
-            QMessageBox.critical(self, "错误", "当前通讯异常，无法发送数据！")
+        if not self.check_client():
             return
 
         if self.config.get("波形状态") == WaveformStatus.Abnormal:
@@ -424,13 +479,15 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", "当前未设置波形，请先设置波形！")
             return
 
+        # if self.client.read_input_registers(RegisterAddress.Error) != 0:
+        #     QMessageBox.critical(self, "错误", "当前PLC故障，请先复位后再发送数据！")
+
         model = self.latex_board.model
 
         coefficient_matrix = model.c.T
-        coefficient_matrix *= self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 转换真实坐标
+        coefficient_matrix *= self.motor_pool[self.config["当前电机"]]["导轨长度"]  # 转换真实坐标
         coefficient_matrix *= self.config["幅值比例"]  # 增幅
         coefficient_matrix[:, 3] += self.config["偏移量"]
-        print(coefficient_matrix)
 
         packet = float_to_fixed(np.column_stack([model.x[:-1], coefficient_matrix]).flatten())
 
@@ -438,13 +495,7 @@ class MainWindow(QMainWindow):
         address = RegisterAddress.Coefficient
         split_packet = split_array(packet)
         for sub_packet in split_packet:
-            response = self.client.write_registers(address, sub_packet)
-            if response is None:
-                print("写入失败（无响应）")
-            elif response.isError():
-                print(f"服务器返回错误：{response}")
-            else:
-                print(f"写入成功")
+            process_response(self.client.write_registers(address, sub_packet))
             address += len(sub_packet)
 
         # 状态和长度
@@ -455,8 +506,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def stop_motor(self):
-        if self.client is None or not self.client.connect() or not self.client.is_socket_open():
-            QMessageBox.critical(self, "错误", "当前通讯异常，无法发送数据！")
+        if not self.check_client():
             return
 
         self.client.write_registers(RegisterAddress.Status, [0])
@@ -528,7 +578,7 @@ class MainWindow(QMainWindow):
                 try:
                     with open(normalized_path, "rb") as file:
                         self.config.update(pickle.load(file))
-                        self.select_method.setCurrentText(self.config["插值方法"].value)
+                        self.method_selection.setCurrentText(self.config["插值方法"].value)
                         self.set_offset.setValue(self.config["偏移量"])
                         self.set_frequency.setValue(self.config["频率"])
                         self.set_amplitude.setValue(int(self.config["幅值比例"] * 100))
@@ -586,7 +636,7 @@ class MainWindow(QMainWindow):
                 processed_x = (x + i) / self.config.get("频率")
 
                 # Y坐标变换
-                absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
+                absolute_y = y * self.motor_pool.get(self.motor_selection_box.currentText()).get("导轨长度")  # 换算绝对坐标
                 processed_y = (absolute_y * self.config.get("幅值比例")) + self.config.get("偏移量")  # 偏移和增幅
                 if (self.mock_axis_x.min() <= processed_x <= self.mock_axis_x.max()
                         and self.mock_axis_y.min() <= processed_y <= self.mock_axis_y.max()):
@@ -619,7 +669,7 @@ class MainWindow(QMainWindow):
                         processed_x = x / self.config.get("频率")
 
                         # Y坐标变换
-                        absolute_y = y * self.motor_pool.get(self.motor_selection.currentText()).get("导轨长度")  # 换算绝对坐标
+                        absolute_y = y * self.motor_pool.get(self.motor_selection_box.currentText()).get("导轨长度")  # 换算绝对坐标
                         processed_y = (absolute_y * self.config.get("幅值比例")) + self.config.get("偏移量")  # 偏移和增幅
 
                         result.append(
@@ -646,6 +696,18 @@ class MainWindow(QMainWindow):
             self.update_status("PLC连接成功！")
         else:
             self.update_status("PLC连接失败！")
+
+    def check_client(self, message: str="当前通讯异常，无法发送数据！") -> bool:
+        """
+        检查ModbusTCP客户端通信状态
+        :message: 错误弹窗显示信息
+        :return: 检查结果
+        """
+        if self.client is None or not self.client.connect() or not self.client.is_socket_open():
+            QMessageBox.critical(self, "错误", message)
+            return False
+
+        return True
 
 
 if __name__ == "__main__":

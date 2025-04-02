@@ -31,4 +31,7 @@ class InterpolationManager:
 class RegisterAddress:
     Status = 0x2000
     Length = 0x2001
-    Coefficient = 0x2002
+    Error = 0x2002
+    Power = 0x2003
+    Home = 0x2004
+    Coefficient = 0x2010
