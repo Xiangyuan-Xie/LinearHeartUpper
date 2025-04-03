@@ -1,14 +1,13 @@
-import math
 import pickle
 import sys
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Event
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from PySide6.QtCore import Qt, QPointF, QThreadPool, Slot, QDir
+from PySide6.QtCore import Qt, QThreadPool, Slot, QDir
 from PySide6.QtGui import QAction, QPainter
 from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
                                QTabWidget, QMenuBar, QMenu, QFileDialog, QSpinBox, QVBoxLayout, QWidget, QLabel,
@@ -18,8 +17,9 @@ from flask_cors import CORS
 from pymodbus.client import ModbusTcpClient
 
 from common import Interpolation, InterpolationManager, RegisterAddress
-from communication import float_to_fixed, split_array, process_response
+from communication import float_to_fixed, split_array, process_response, fixed_to_float
 from widget.dialog.connect_plc import ConnectDialog
+from widget.dynamic_chart import DynamicChart
 from widget.latex_board import LatexBoard
 from widget.status_light import StatusLight
 from widget.waveform_modulator import WaveformModulator, WaveformStatus
@@ -46,6 +46,9 @@ class MainWindow(QMainWindow):
         }
         self.client: Optional[ModbusTcpClient] = None
         self.thread_pool = QThreadPool.globalInstance()
+
+        self._read_thread = None
+        self._stop_thread_flag = Event()
 
         # MathJax服务器
         server = Flask(__name__, static_folder="./MathJax")
@@ -334,7 +337,9 @@ class MainWindow(QMainWindow):
         self.start_end_button = QPushButton()
         self.start_end_button.setText("开始")
         self.start_end_button.setStyleSheet("QPushButton { height: 2.5em; } ")
-        self.start_end_button.clicked.connect(self.run_motor)
+        self.start_end_button.clicked.connect(lambda: (
+            self.run_motor() if self.start_end_button.text() == "开始" else self.stop_motor()
+        ))
         motor_running_layout.addWidget(self.start_end_button, 3, 0, 2, 2)
 
         motor_running_frame.setLayout(motor_running_layout)
@@ -375,19 +380,8 @@ class MainWindow(QMainWindow):
 
         feedback_layout.addLayout(record_layout)
 
-        feedback_chart = QChart()
-        feedback_chart_view = QChartView(feedback_chart)
-        feedback_chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        feedback_chart.legend().hide()
-        feedback_layout.addWidget(feedback_chart_view)
-
-        series = QLineSeries()  # 测试波形
-        for i in range(100):
-            x = i
-            y = 50 * (1 + 0.5 * math.sin(x * 0.1))
-            series.append(QPointF(x, y))
-        feedback_chart.addSeries(series)
-        feedback_chart.createDefaultAxes()
+        self.feedback_chart = DynamicChart()
+        feedback_layout.addWidget(self.feedback_chart)
 
         multi_widget_area.addTab(feedback_area, "反馈波形")
 
@@ -484,15 +478,15 @@ class MainWindow(QMainWindow):
 
         model = self.latex_board.model
 
-        coefficient_matrix = model.c.T
+        coefficient_matrix = model.c.T.copy()
         coefficient_matrix *= self.motor_pool[self.config["当前电机"]]["导轨长度"]  # 转换真实坐标
         coefficient_matrix *= self.config["幅值比例"]  # 增幅
         coefficient_matrix[:, 3] += self.config["偏移量"]
 
-        packet = float_to_fixed(np.column_stack([model.x[:-1], coefficient_matrix]).flatten())
+        packet = float_to_fixed(np.append(np.column_stack([model.x[:-1], coefficient_matrix]).flatten(), 1))
 
         # 系数
-        address = RegisterAddress.Coefficient
+        address = 0x6010
         split_packet = split_array(packet)
         for sub_packet in split_packet:
             process_response(self.client.write_registers(address, sub_packet))
@@ -500,18 +494,34 @@ class MainWindow(QMainWindow):
 
         # 状态和长度
         length = len(model.x) - 1
-        self.client.write_registers(RegisterAddress.Status, [1, length])
+        self.client.write_registers(0x6000, [2, length])
+
+        self._read_thread = Thread(target=self._read_position, daemon=True)
+        self._stop_thread_flag.clear()
+        self._read_thread.start()
 
         self.update_status("运行参数设置成功，电机开始运行！")
+        self.start_end_button.setText("结束")
+
+    def _read_position(self):
+        """
+        读取电机位置
+        """
+        while not self._stop_thread_flag.is_set():
+            position = fixed_to_float(np.array(self.client.read_holding_registers(0x6002, count=2).registers))
+            self.feedback_chart.update_data(position)
 
     @Slot()
     def stop_motor(self):
         if not self.check_client():
             return
 
-        self.client.write_registers(RegisterAddress.Status, [0])
+        self.client.write_registers(0x6000, [0])
+
+        self._stop_thread_flag.set()
 
         self.update_status("电机停止运行！")
+        self.start_end_button.setText("开始")
 
     @Slot()
     def update_waveform_status(self, status: WaveformStatus):

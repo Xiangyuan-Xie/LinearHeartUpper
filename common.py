@@ -34,4 +34,5 @@ class RegisterAddress:
     Error = 0x2002
     Power = 0x2003
     Home = 0x2004
+    NumberOfCoefficient = 0x2005
     Coefficient = 0x2010
