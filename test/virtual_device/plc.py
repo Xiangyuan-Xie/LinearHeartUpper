@@ -1,20 +1,20 @@
 import bisect
-import logging
 import time
-from threading import Thread, Event, Lock
+from threading import Thread, Event
 
 import numpy as np
 from pymodbus.datastore import ModbusSequentialDataBlock
 from pymodbus.datastore import ModbusSlaveContext, ModbusServerContext
 from pymodbus.server import StartTcpServer
 
+from common import RegisterAddress
 from communication import fixed_to_float, float_to_fixed
+from logger import logger
 
 
 class ModbusVirtualSlave:
     def __init__(self, slave_id=1, port=502, address='0.0.0.0'):
         """
-        初始化虚拟从站
         :param slave_id: 从站设备ID (默认1)
         :param port: 监听端口 (默认502)
         :param address: 绑定地址 (默认0.0.0.0)
@@ -25,7 +25,6 @@ class ModbusVirtualSlave:
 
         self._stop_thread_flag = Event()
         self._update_thread = None
-        self._lock = Lock()
 
         # 数据存储
         self.data_store = {
@@ -47,6 +46,8 @@ class ModbusVirtualSlave:
         启动ModbusTCP虚拟从站
         """
         try:
+            logger.info("Modbus virtual slave start！")
+
             self._update_thread = Thread(target=self._update_task, daemon=True)
             self._update_thread.start()
 
@@ -55,31 +56,46 @@ class ModbusVirtualSlave:
                 address=(self.address, self.port)
             )
         except Exception as e:
-            logging.error(f"Modbus虚拟从站启动失败: {e}！")
+            logger.error(f"Modbus virtual slave fail: {e}！")
 
     def _update_task(self):
         """
         数据更新线程任务
         """
         coefficients = []
+        frequency = None
         start_time = None
         while not self._stop_thread_flag.is_set():
-            flag = self.get_holding_registers(0x6000, 1)[0]
-            if flag == 2:  # 参数更新
-                coefficients.clear()
-                number_coefficient = self.get_holding_registers(0x6001, 1)[0]
-                for i in range(number_coefficient):
-                    decoded_coefficient = fixed_to_float(
-                        np.array(self.get_holding_registers(0x6010 + 10 * i, 12)))
-                    coefficients.append(decoded_coefficient.tolist())
-                self.set_holding_registers(0x6000, [1])
-                start_time = time.time()
-            elif flag == 1:  # 正常运行
-                position = interpolation((time.time() - start_time) % 1, coefficients)
-                encoded_position = float_to_fixed(np.array([position]))
-                self.set_holding_registers(0x6002, encoded_position.tolist())
+            status = self.get_holding_registers(RegisterAddress.Status, 1)[0]
+            power = self.get_holding_registers(RegisterAddress.Power, 1)[0]
+
+            # 通电
+            if power == 1:
+                # 参数更新
+                if status == 2:
+                    coefficients.clear()
+
+                    frequency = fixed_to_float(np.array(self.get_holding_registers(RegisterAddress.Frequency, 2))).item()
+                    number_of_interval = self.get_holding_registers(RegisterAddress.NumberOfInterval, 1)[0]
+                    for i in range(number_of_interval):
+                        decoded_coefficient = fixed_to_float(
+                            np.array(self.get_holding_registers(RegisterAddress.Coefficients + 10 * i, 12)))
+                        coefficients.append(decoded_coefficient.tolist())
+
+                    self.set_holding_registers(RegisterAddress.Status, [1])
+                    start_time = time.time()
+                    logger.info(f"Receive new run parameters: {frequency} Hz, {number_of_interval} intervals!")
+
+                # 正常运行
+                elif status == 1:
+                    position = interpolation(((time.time() - start_time) % 1) / frequency, coefficients)
+                    encoded_position = float_to_fixed(np.array([position]))
+                    self.set_holding_registers(RegisterAddress.Position, encoded_position.tolist())
+
+            # 断电
             else:
-                continue
+                if status != 0:
+                    self.set_holding_registers(RegisterAddress.Status, [0])
 
     def stop_server(self):
         """
@@ -140,11 +156,5 @@ def interpolation(x, coefficients):
 
 
 if __name__ == "__main__":
-    # 启用调试日志
-    logging.basicConfig()
-    logging.getLogger().setLevel(logging.INFO)
-
-    # 创建并启动虚拟从站
     slave = ModbusVirtualSlave()
-    logging.info("Modbus虚拟从站已启动！")
     slave.start_server()

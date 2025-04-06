@@ -1,40 +1,37 @@
 import re
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import Signal, Slot, QThreadPool
 from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QLineEdit, QPushButton, QMessageBox
 
+from common import ConnectionStatus
 
-class ConnectDialog(QDialog):
-    status_message = Signal(str)
-    connection_info = Signal(str, int)
 
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("设置")
+class ConnectionDialog(QDialog):
+    status = Signal(ConnectionStatus)
+    connection_request = Signal(str, int)
+    thread_pool = QThreadPool.globalInstance()
 
-        layout = QGridLayout()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("连接")
 
-        host_label = QLabel("IP地址：")
-        host_label.setFixedWidth(60)
-        layout.addWidget(host_label, 1, 0)
+        self.layout = QGridLayout(self)
+
+        host_label = QLabel("目标地址：")
+        self.layout.addWidget(host_label, 1, 0)
 
         self.host = QLineEdit("127.0.0.1")
-        self.host.setFixedWidth(110)
-        layout.addWidget(self.host, 1, 1)
+        self.layout.addWidget(self.host, 1, 1)
 
-        port_label = QLabel("端口：")
-        port_label.setFixedWidth(60)
-        layout.addWidget(port_label, 2, 0)
+        port_label = QLabel("目标端口：")
+        self.layout.addWidget(port_label, 2, 0)
 
         self.port = QLineEdit("502")
-        self.port.setFixedWidth(110)
-        layout.addWidget(self.port, 2, 1)
+        self.layout.addWidget(self.port, 2, 1)
 
         self.communication_button = QPushButton("连接")
         self.communication_button.clicked.connect(self._connect_plc)
-        layout.addWidget(self.communication_button, 3, 0, 1, 2)
-
-        self.setLayout(layout)
+        self.layout.addWidget(self.communication_button, 3, 0, 1, 2)
 
     @Slot()
     def _connect_plc(self):
@@ -53,8 +50,7 @@ class ConnectDialog(QDialog):
             QMessageBox.warning(self, "警告", "请检查当前设置端口是否有效！")
             return
 
-        host = self.host.text()
-        port = int(self.port.text())
+        self.status.emit(ConnectionStatus.Connecting)
+        self.connection_request.emit(self.host.text(), int(self.port.text()))
+
         self.accept()
-        self.status_message.emit(f"正在连接PLC（{host}:{port}），请等待！")
-        self.connection_info.emit(host, port)

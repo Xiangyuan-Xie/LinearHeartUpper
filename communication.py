@@ -3,6 +3,7 @@ from typing import Tuple, Optional
 import numpy as np
 from pymodbus.client import ModbusTcpClient
 from pymodbus.pdu import ModbusPDU
+from pymodbus.pdu.mei_message import ReadDeviceInformationRequest
 
 
 def interval_encode(a_array: np.ndarray, b_array: np.ndarray) -> np.ndarray:
@@ -114,17 +115,6 @@ class SplineCoefficientCompressor:
         return self._mu_law_expand(y)
 
 
-def unsigned_combine(a: int, b: int) -> int:
-    """
-    将两个无符号整数拼接为16位二进制数
-    :param a: 4位无符号整数
-    :param b: 12位无符号整数
-    :return: 16位二进制数
-    """
-    assert 0 <= a <= 15 and 0 <= b <= 4095, "尝试拼接不符合范围的两个整数！"
-    return (a << 12) | b
-
-
 def float_to_fixed(arr: np.ndarray, frac_bits: int = 16, byte_order: str = '>') -> np.ndarray:
     """
     批量将浮点数转换为Q格式定点数并拆分为高/低16位
@@ -229,3 +219,19 @@ def process_response(response: ModbusPDU):
         print(f"服务器返回错误：{response}")
     else:
         print(f"写入成功")
+
+
+def check_client_status(client: Optional[ModbusTcpClient]) -> bool:
+    """
+    检查PLC连接状态
+    :param client: ModbusTcp客户端对象
+    :return: 连接状态
+    """
+    if client is not None and client.connect() and client.is_socket_open():
+        try:
+            client.execute(False, ReadDeviceInformationRequest())
+        except ConnectionResetError:
+            return False
+        return True
+    else:
+        return False

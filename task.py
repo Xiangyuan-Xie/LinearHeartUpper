@@ -1,6 +1,8 @@
-from typing import Sequence, Tuple, Any
+from typing import Sequence, Any, List
 
+import pandas as pd
 from PySide6.QtCore import QRunnable, QObject, Signal
+from pymodbus.client import ModbusTcpClient
 from scipy.interpolate import CubicSpline, Akima1DInterpolator
 
 from common import Interpolation, InterpolationManager
@@ -18,8 +20,7 @@ class TaskRunner(QRunnable):
 class ExpressionTask(QObject):
     result = Signal(Any, str, str)
 
-    def __init__(self, points: Sequence[Tuple[float, float]],
-                 offset: float, amplitude: float, method: Interpolation):
+    def __init__(self, points: Sequence[Sequence[float]], offset: float, amplitude: float, method: Interpolation):
         super().__init__()
         self.points = sorted(points, key=lambda p: p[0])
         self.offset = offset
@@ -117,3 +118,33 @@ class ExpressionTask(QObject):
 
         except Exception as e:
             self.result.emit(None, "", f"插值多项式计算过程中出错：{e}")
+
+
+class ConnectionTask(QObject):
+    connect_result = Signal(ModbusTcpClient)
+
+    def __init__(self, host: str, port: int):
+        super().__init__()
+        self.host = host
+        self.port = port
+
+    def run(self):
+        client = ModbusTcpClient(host=self.host, port=self.port)
+        if client.connect() and client.is_socket_open():
+            self.connect_result.emit(client)
+        else:
+            self.connect_result.emit(None)
+
+
+class SaveRecordTask(QObject):
+    def __init__(self, record_data: List[float]):
+        super().__init__()
+        self.record_data = record_data.copy()
+
+    def run(self):
+        df = pd.DataFrame(self.record_data, columns=["Position"])
+        df.to_csv(
+            "output.csv",
+            index=False,
+            float_format='%.4f'
+        )
