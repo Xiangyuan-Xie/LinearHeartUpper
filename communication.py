@@ -207,18 +207,28 @@ def split_array(arr: np.ndarray, max_length: int=120):
     return chunks
 
 
-def process_response(response: ModbusPDU):
+def process_write_response(response: ModbusPDU) -> int:
     """
-    处理ModbusTCP协议的响应
+    处理写入请求的响应
     :param response: ModbusPDU包
-    :return: 
+    :return: 处理结果
     """
-    if response is None:
-        print("写入失败（无响应）")
-    elif response.isError():
-        print(f"服务器返回错误：{response}")
-    else:
-        print(f"写入成功")
+    if response is None or response.isError():
+        return False
+
+    return True
+
+
+def process_read_response(response: ModbusPDU) -> tuple[bool, Optional[ModbusPDU]]:
+    """
+    处理读取请求的响应
+    :param response: ModbusPDU包
+    :return: 处理结果
+    """
+    if response is None or response.isError():
+        return False, response
+
+    return True, response
 
 
 def check_client_status(client: Optional[ModbusTcpClient]) -> bool:
@@ -230,8 +240,8 @@ def check_client_status(client: Optional[ModbusTcpClient]) -> bool:
     if client is not None and client.connect() and client.is_socket_open():
         try:
             client.execute(False, ReadDeviceInformationRequest())
+            return True
         except ConnectionResetError:
             return False
-        return True
-    else:
-        return False
+
+    return False
