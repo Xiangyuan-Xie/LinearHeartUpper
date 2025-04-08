@@ -7,24 +7,23 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import Qt, QThreadPool, Slot, QDir
+from PySide6.QtCore import Qt, QThreadPool, Slot, QDir, QSize
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
                                QTabWidget, QMenuBar, QMenu, QFileDialog, QSpinBox, QVBoxLayout, QWidget, QLabel,
-                               QGridLayout, QPushButton, QMessageBox, QSlider)
+                               QGridLayout, QPushButton, QMessageBox, QSlider, QSizePolicy)
 from pymodbus.client import ModbusTcpClient
 
 from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
                     ConnectionStatus)
-from communication import float_to_fixed, split_array, process_write_response, fixed_to_float, check_client_status, \
-    process_read_response
+from communication import (float_to_fixed, split_array, process_write_response, fixed_to_float, check_client_status,
+                           process_read_response)
 from mathjax_server import run_server
 from task import ConnectionTask, TaskRunner
 from widget.chart import FeedbackWaveformChart, MockWaveformChart
 from widget.connection_dialog import ConnectionDialog
 from widget.latex_board import LatexBoard
-from widget.status_light import StatusLight
-from widget.status_manager import ConnectionStatusManager, RecordStatusManager
+from widget.status_manager import ConnectionStatusManager, RecordStatusManager, MotorStatusManager
 from widget.waveform_modulator import WaveformModulator, WaveformStatus
 
 
@@ -129,13 +128,15 @@ class MainWindow(QMainWindow):
         """
         middle_layout = QVBoxLayout()
 
-        # 电机选择
+        # 电机设置
         motor_setting_frame = QFrame()
         motor_setting_frame.setFrameShape(QFrame.Shape.StyledPanel)
         motor_setting_frame.setFrameShadow(QFrame.Shadow.Raised)
-        motor_setting_layout = QGridLayout()  # 使用垂直布局
+
+        motor_setting_layout = QGridLayout()
 
         motor_setting_label = QLabel("<h3>电机设置</h3>")
+        motor_setting_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_setting_layout.addWidget(motor_setting_label, 0, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
 
         motor_selection_label = QLabel("选择电机：")
@@ -163,7 +164,7 @@ class MainWindow(QMainWindow):
             self.motor_pool[self.config["当前电机"]].__setitem__("零位", zero),
             self.mock_chart.axis_y.setMin(zero),
         ))
-        motor_setting_layout.addWidget(self.zero_position, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+        motor_setting_layout.addWidget(self.zero_position, 2, 1)
 
         limit_position_label = QLabel("限位：")
         limit_position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -189,15 +190,16 @@ class MainWindow(QMainWindow):
         params_frame = QFrame()
         params_frame.setFrameShape(QFrame.Shape.StyledPanel)
         params_frame.setFrameShadow(QFrame.Shadow.Raised)
+
         params_layout = QGridLayout()
 
         params_label = QLabel("<h3>参数设置</h3>")
         params_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        params_layout.addWidget(params_label, 0, 0, 1, 2)
+        params_layout.addWidget(params_label, 0, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
 
         set_waveform_label = QLabel("插值方法：")
         set_waveform_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        params_layout.addWidget(set_waveform_label, 1, 0)
+        params_layout.addWidget(set_waveform_label, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.method_selection = QComboBox()
         self.method_selection.addItems([InterpolationManager.get_name(method) for method in Interpolation])
@@ -258,53 +260,40 @@ class MainWindow(QMainWindow):
         motor_init_frame = QFrame()
         motor_init_frame.setFrameShape(QFrame.Shape.StyledPanel)
         motor_init_frame.setFrameShadow(QFrame.Shadow.Raised)
+
         motor_init_layout = QGridLayout()
+        motor_init_layout.setColumnStretch(0, 1)
+        motor_init_layout.setColumnStretch(1, 1)
 
         motor_init_label = QLabel("<h3>电机初始化</h3>")
         motor_init_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        motor_init_layout.addWidget(motor_init_label, 0, 0, 1, 2)
-
-        self.motor_status_light = StatusLight()
-        motor_init_layout.addWidget(self.motor_status_light, 1, 0, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+        motor_init_layout.addWidget(motor_init_label, 0, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.power_button = QPushButton()
         self.power_button.setText(MotorPowerStatus.PowerOn)
         self.power_button.clicked.connect(self.toggle_motor_power)
-        motor_init_layout.addWidget(self.power_button, 1, 1)
+        motor_init_layout.addWidget(self.power_button, 1, 0)
 
         self.reset_button = QPushButton()
         self.reset_button.setText("复位")
         self.reset_button.clicked.connect(self.motor_reset)
-        motor_init_layout.addWidget(self.reset_button, 2, 1)
+        motor_init_layout.addWidget(self.reset_button, 1, 1)
 
         self.move_to_target_button = QPushButton()
         self.move_to_target_button.setText("移动至")
         self.move_to_target_button.clicked.connect(self.motor_move_to_target)
-        motor_init_layout.addWidget(self.move_to_target_button, 3, 0)
+        motor_init_layout.addWidget(self.move_to_target_button, 2, 0)
 
         self.set_movement_distance = QDoubleSpinBox()
         self.set_movement_distance.setDecimals(1)
         self.set_movement_distance.setSingleStep(0.1)
         self.set_movement_distance.setValue(0)
         self.set_movement_distance.setSuffix(" mm")
-        motor_init_layout.addWidget(self.set_movement_distance, 3, 1)
-
-        motor_init_frame.setLayout(motor_init_layout)
-        right_layout.addWidget(motor_init_frame)
-
-        # 电机运行
-        motor_running_frame = QFrame()
-        motor_running_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        motor_running_frame.setFrameShadow(QFrame.Shadow.Raised)
-        motor_running_layout = QGridLayout()
-
-        motor_running_label = QLabel("<h3>电机运行</h3>")
-        motor_running_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        motor_running_layout.addWidget(motor_running_label, 0, 0, 1, 2)
+        motor_init_layout.addWidget(self.set_movement_distance, 2, 1)
 
         simulation_time_label = QLabel("模拟时长：")
         simulation_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        motor_running_layout.addWidget(simulation_time_label, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        motor_init_layout.addWidget(simulation_time_label, 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
         simulation_time = QDoubleSpinBox()
         simulation_time.setRange(0, 100)
@@ -316,13 +305,30 @@ class MainWindow(QMainWindow):
             self.mock_chart.axis_x.setMax(value),
             self.update_mock_waveform_display(),
         ))
-        motor_running_layout.addWidget(simulation_time, 1, 1)
+        motor_init_layout.addWidget(simulation_time, 3, 1)
+
+        motor_init_frame.setLayout(motor_init_layout)
+        right_layout.addWidget(motor_init_frame)
+
+        # 电机运行
+        motor_running_frame = QFrame()
+        motor_running_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        motor_running_frame.setFrameShadow(QFrame.Shadow.Raised)
+
+        motor_running_layout = QGridLayout()
+
+        motor_running_label = QLabel("<h3>电机运行</h3>")
+        motor_running_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        motor_running_layout.addWidget(motor_running_label, 0, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.motor_status_manager = MotorStatusManager()
+        motor_running_layout.addWidget(self.motor_status_manager, 1, 0, 2, 2)
 
         self.start_close_button = QPushButton()
         self.start_close_button.setText(MotorOperationStatus.Start)
-        self.start_close_button.setStyleSheet("QPushButton { height: 2.5em; } ")
+        self.start_close_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.start_close_button.clicked.connect(self.toggle_motor_operation)
-        motor_running_layout.addWidget(self.start_close_button, 2, 0, 2, 2)
+        motor_running_layout.addWidget(self.start_close_button, 3, 0, 2, 2)
 
         motor_running_frame.setLayout(motor_running_layout)
         right_layout.addWidget(motor_running_frame)
@@ -456,7 +462,7 @@ class MainWindow(QMainWindow):
             if not process_write_response(self.client.write_register(RegisterAddress.Power, 1)):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
-            self.motor_status_light.setStatus(StatusLight.Color.Green)
+            self.motor_status_manager.set_green()
             sender.setText(MotorPowerStatus.PowerOff)
         elif sender.text() == MotorPowerStatus.PowerOff:
             if self.start_close_button.text() == MotorOperationStatus.Stop:
@@ -468,7 +474,7 @@ class MainWindow(QMainWindow):
             if not process_write_response(self.client.write_register(RegisterAddress.Power, 0)):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
-            self.motor_status_light.setStatus(StatusLight.Color.Grey)
+            self.motor_status_manager.set_grey()
             sender.setText(MotorPowerStatus.PowerOn)
         else:
             raise ValueError("错误的电机电源状态！")
@@ -568,7 +574,7 @@ class MainWindow(QMainWindow):
             self._read_position_thread.start()
 
             self.update_status("运行参数设置成功，电机开始运行！")
-            self.motor_status_light.setStatus(StatusLight.Color.Orange)
+            self.motor_status_manager.set_orange()
             sender.setText(MotorOperationStatus.Stop)
 
         # 停止运行
@@ -577,8 +583,9 @@ class MainWindow(QMainWindow):
                 if not process_write_response(self.client.write_registers(0x6000, [0])):
                     QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                     return
+                self.motor_status_manager.set_green()
             except ConnectionResetError:
-                self.motor_status_light.setStatus(StatusLight.Color.Grey)
+                self.motor_status_manager.set_grey()
 
             self._stop_thread_flag.set()
             sender.setText(MotorOperationStatus.Start)
@@ -596,7 +603,7 @@ class MainWindow(QMainWindow):
             if result:
                 if response.registers[0] != 0:
                     self.start_close_button.clicked.emit()
-                    self.motor_status_light.setStatus(StatusLight.Color.Red)
+                    self.motor_status_manager.set_red("错误")
 
     def _read_position(self):
         """
@@ -697,11 +704,11 @@ class MainWindow(QMainWindow):
             self.connection_status.set_status(ConnectionStatus.Connected)
             result, response = process_read_response(self.client.read_holding_registers(RegisterAddress.Power, count=1))
             if result and response.registers[0] == 1:
-                self.motor_status_light.setStatus(StatusLight.Color.Green)
+                self.motor_status_manager.set_green()
             else:
                 if not result:
                     QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
-                self.motor_status_light.setStatus(StatusLight.Color.Grey)
+                self.motor_status_manager.set_grey()
 
     @Slot()
     def update_mock_waveform_display(self):
@@ -754,7 +761,7 @@ class MainWindow(QMainWindow):
         """
         PLC连接断开处理
         """
-        self.motor_status_light.setStatus(StatusLight.Color.Grey)
+        self.motor_status_manager.set_grey()
         if self.start_close_button.text() == MotorOperationStatus.Stop:
             self.start_close_button.clicked.emit()
         QMessageBox.critical(self, "错误", "PLC异常断连，请检查！")

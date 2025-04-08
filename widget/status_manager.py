@@ -2,11 +2,40 @@ from enum import StrEnum
 
 from PySide6.QtCore import Signal, QTimer, Qt, Slot
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QGridLayout
 
 from common import ConnectionStatus
 from communication import check_client_status
 from widget.status_light import StatusLight
+
+
+class MotorStatusManager(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.layout = QGridLayout(self)
+
+        self.status_light = StatusLight(25)
+        self.layout.addWidget(self.status_light, 0, 0, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.status_label = QLabel("离线")
+        self.layout.addWidget(self.status_label, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def set_grey(self, message: str="离线"):
+        self.status_light.setStatus(StatusLight.Color.Grey)
+        self.status_label.setText(message)
+
+    def set_red(self, message: str):
+        self.status_light.setStatus(StatusLight.Color.Red)
+        self.status_label.setText(message)
+
+    def set_orange(self, message: str="运行中..."):
+        self.status_light.setStatus(StatusLight.Color.Orange)
+        self.status_label.setText(message)
+
+    def set_green(self, message: str="待机"):
+        self.status_light.setStatus(StatusLight.Color.Green)
+        self.status_label.setText(message)
 
 
 class ConnectionStatusManager(QWidget):
