@@ -12,7 +12,7 @@ class StatusLight(QWidget):
         Orange = QColor(255, 165, 0)
         Red = QColor(255, 0, 0)
 
-    def __init__(self, diameter: int=25, color: Color=Color.Grey.value, flashing: bool=False):
+    def __init__(self, diameter: int=25, color: Color=Color.Grey, flashing: bool=False):
         super().__init__()
         self.diameter = diameter  # 直径
         self.current_color = color  # 颜色
@@ -28,7 +28,7 @@ class StatusLight(QWidget):
         设置状态（颜色）
         :param status: 新状态
         """
-        self.current_color = status.value
+        self.current_color = status
         self.update()
 
     def setFlashing(self, enable: bool):
@@ -68,10 +68,10 @@ class StatusLight(QWidget):
         # 闪烁效果计算
         if self.flashing:
             alpha = 255 - abs(self.flash_phase - 10) * 25
-            color = QColor(self.current_color)
+            color = QColor(self.current_color.value)
             color.setAlpha(alpha)
         else:
-            color = self.current_color
+            color = self.current_color.value
 
         # 绘制背景
         painter.setBrush(QBrush(color))

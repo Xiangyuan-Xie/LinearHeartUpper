@@ -28,14 +28,27 @@ class InterpolationManager:
             raise ValueError("未知的插值方法！")
 
 
-class RegisterAddress(IntEnum):
-    Status = 0x6000  # 运行状态寄存器
-    ErrorCode = 0x6001  # 错误码寄存器
-    Power = 0x6002  # 电源状态寄存器
-    Position = 0x6003  # 位置寄存器(0x6003/0x6004)
-    Frequency = 0x7000  # 频率寄存器(0x7000/0x7001)
-    NumberOfInterval = 0x7002  # 区间数量寄存器
-    Coefficients = 0x7003  # 系数寄存器
+class RegisterAddress:
+    # 线圈
+    class Coil(IntEnum):
+        PowerOn = 0
+        PowerOff = 1
+        Reset = 2
+        Start = 3
+        Stop = 4
+        isWrite = 5
+
+    # 输入寄存器
+    class Input(IntEnum):
+        Status = 0
+        Position = 1
+
+    # 保持寄存器
+    class Holding(IntEnum):
+        TargetPos = 0
+        NumberOfInterval = 2
+        Frequency = 3
+        Coefficients = 5
 
 
 class MotorPowerStatus(StrEnum):

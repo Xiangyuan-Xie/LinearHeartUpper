@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from PySide6.QtCore import Signal, QTimer, Qt, Slot
+from PySide6.QtCore import Signal, Qt, Slot
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QGridLayout
 
@@ -12,7 +12,6 @@ from widget.status_light import StatusLight
 class MotorStatusManager(QWidget):
     def __init__(self):
         super().__init__()
-
         self.layout = QGridLayout(self)
 
         self.status_light = StatusLight(25)
@@ -21,21 +20,12 @@ class MotorStatusManager(QWidget):
         self.status_label = QLabel("离线")
         self.layout.addWidget(self.status_label, 0, 1, alignment=Qt.AlignmentFlag.AlignCenter)
 
-    def set_grey(self, message: str="离线"):
-        self.status_light.setStatus(StatusLight.Color.Grey)
+    def set_status(self, color: StatusLight.Color, message: str):
+        self.status_light.setStatus(color)
         self.status_label.setText(message)
 
-    def set_red(self, message: str):
-        self.status_light.setStatus(StatusLight.Color.Red)
-        self.status_label.setText(message)
-
-    def set_orange(self, message: str="运行中..."):
-        self.status_light.setStatus(StatusLight.Color.Orange)
-        self.status_label.setText(message)
-
-    def set_green(self, message: str="待机"):
-        self.status_light.setStatus(StatusLight.Color.Green)
-        self.status_label.setText(message)
+    def get_color(self):
+        return self.status_light.current_color
 
 
 class ConnectionStatusManager(QWidget):
@@ -63,10 +53,6 @@ class ConnectionStatusManager(QWidget):
         self.status_label.setStyleSheet("color: #666;")
         self.layout.addWidget(self.status_label)
 
-        self.check_timer = QTimer()
-        self.check_timer.timeout.connect(self.check_connection)
-        self.check_timer.start(1000)
-
         self.set_status(ConnectionStatus.Disconnected)
 
     def set_status(self, status: ConnectionStatus):
@@ -84,17 +70,9 @@ class ConnectionStatusManager(QWidget):
                 self.status_light.setFlashing(False)
             self.update()
 
-    def check_connection(self):
-        """
-        检测连接状态
-        """
-        if self.current_status == ConnectionStatus.Connected and not check_client_status(self.parent.client):
-            self.set_status(ConnectionStatus.Disconnected)
-            self.disconnected.emit()
-
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.current_status == ConnectionStatus.Disconnected:
+            if self.current_status != ConnectionStatus.Connecting:
                 self.connection_request.emit()
 
     def enterEvent(self, event):

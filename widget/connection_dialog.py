@@ -20,7 +20,7 @@ class ConnectionDialog(QDialog):
         host_label = QLabel("目标地址：")
         self.layout.addWidget(host_label, 1, 0)
 
-        self.host = QLineEdit("127.0.0.1")
+        self.host = QLineEdit("192.168.0.100")
         self.layout.addWidget(self.host, 1, 1)
 
         port_label = QLabel("目标端口：")
