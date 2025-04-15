@@ -5,7 +5,6 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QGridLayout
 
 from common import ConnectionStatus
-from communication import check_client_status
 from widget.status_light import StatusLight
 
 
@@ -90,9 +89,10 @@ class RecordStatusManager(QWidget):
         Start = "开始录制"
         Stop = "结束录制"
 
-    def __init__(self, parent):
+    def __init__(self, parent, connection_status_manager: ConnectionStatusManager):
         super().__init__()
         self.parent = parent
+        self.connection_status_manager = connection_status_manager
 
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(5, 0, 5, 0)
@@ -111,8 +111,8 @@ class RecordStatusManager(QWidget):
         切换录制状态
         """
         if self.record_button.text() == self.RecordStatus.Start:
-            if not check_client_status(self.parent.client):
-                if (QMessageBox.warning(self.parent, "警告", "当前没有反馈波形，确定要继续开始录制吗？",
+            if self.connection_status_manager.current_status != ConnectionStatus.Connected:
+                if (QMessageBox.warning(self.parent, "警告", "当前没有连接PLC，确定要继续开始录制吗？",
                                         QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
                         == QMessageBox.StandardButton.Cancel):
                     return

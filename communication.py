@@ -1,10 +1,9 @@
 from typing import Optional
 
 import numpy as np
-from pymodbus.client import ModbusTcpClient
+from loguru import logger
 from pymodbus.pdu import ModbusPDU
 
-from common import RegisterAddress
 from widget.status_light import StatusLight
 
 
@@ -83,7 +82,7 @@ def fixed_to_float(arr: np.ndarray, frac_bits: int = 16, byte_order: str = '<') 
 def split_array(arr: np.ndarray, max_length: int=120):
     """
     分割数组
-    :param arr:  编码后的一维数据包
+    :param arr: 编码后的一维数据包
     :param max_length: 每个列表的最大长度（默认120）
     :return 二维列表
     """
@@ -100,45 +99,43 @@ def split_array(arr: np.ndarray, max_length: int=120):
     return chunks
 
 
-def process_write_response(response: ModbusPDU) -> int:
+def process_write_response(response: ModbusPDU, response_type: str="未知寄存器") -> bool:
     """
     处理写入请求的响应
     :param response: ModbusPDU包
+    :param response_type: 寄存器类型
     :return: 处理结果
     """
-    if response is None or response.isError():
+    if response is None:
+        logger.error(f"请求写入{response_type}时未响应！")
         return False
+    elif response.isError():
+        logger.error(f"写入{response_type}({response.address})失败，"
+                     f"内容：{response.bits if response_type == "线圈" else response.registers}")
+        return False
+    else:
+        logger.info(f"写入{response_type}({response.address})成功，"
+                    f"内容：{response.bits if response_type == "线圈" else response.registers}")
+        return True
 
-    return True
 
-
-def process_read_response(response: ModbusPDU) -> tuple[bool, Optional[ModbusPDU]]:
+def process_read_response(response: ModbusPDU, response_type: str="未知寄存器") -> tuple[bool, Optional[ModbusPDU]]:
     """
     处理读取请求的响应
     :param response: ModbusPDU包
+    :param response_type: 寄存器类型
     :return: 处理结果
     """
-    if response is None or response.isError():
+    if response is None:
+        logger.error(f"请求读取{response_type}时未响应！")
+        return False, None
+    elif response.isError():
+        logger.error(f"读取{response_type}({response.address})失败！")
         return False, response
-
-    return True, response
-
-
-def check_client_status(client: Optional[ModbusTcpClient]) -> bool:
-    """
-    检查PLC连接状态
-    :param client: ModbusTcp客户端对象
-    :return: 连接状态
-    """
-    if client is not None and client.connect() and client.is_socket_open():
-        try:
-            _, response = process_read_response(client.read_input_registers(RegisterAddress.Input.Status, count=1))
-            if not response.isError():
-                return True
-        except ConnectionResetError:
-            return False
-
-    return False
+    else:
+        logger.info(f"读取{response_type}({response.address})成功，"
+                    f"内容：{response.bits if response_type == "线圈" else response.registers}")
+        return True, response
 
 
 def process_status_code(status_code: int) -> tuple[StatusLight.Color, str]:
@@ -159,4 +156,3 @@ def process_status_code(status_code: int) -> tuple[StatusLight.Color, str]:
         return StatusLight.Color.Red, "故障"
     else:
         return StatusLight.Color.Grey, "未知"
-

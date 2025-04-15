@@ -11,12 +11,13 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
                                QTabWidget, QMenuBar, QMenu, QFileDialog, QSpinBox, QVBoxLayout, QWidget, QLabel,
                                QGridLayout, QPushButton, QMessageBox, QSlider, QSizePolicy)
+from loguru import logger
 from pymodbus.client import ModbusTcpClient
 
 from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
                     ConnectionStatus)
-from communication import (float_to_fixed, split_array, process_write_response, check_client_status,
-                           process_read_response, process_status_code)
+from communication import (float_to_fixed, split_array, process_write_response, process_read_response,
+                           process_status_code)
 from mathjax_server import run_server
 from task import ConnectionTask, TaskRunner, SaveMockwaveformTask, SaveWaveformConfigTask, ReadWaveformConfigTask
 from widget.chart import FeedbackWaveformChart, MockWaveformChart
@@ -48,7 +49,6 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
 
         self.client: Optional[ModbusTcpClient] = None
-        self.create_connection_request('192.168.0.100', 502)
 
         self._read_position_thread: Optional[Thread] = None
         self._read_position_flag = Event()
@@ -75,8 +75,7 @@ class MainWindow(QMainWindow):
         self.connection_status = ConnectionStatusManager(self)
         self.connection_status.connection_request.connect(self.open_connection_dialog)
         self.status_bar.addPermanentWidget(self.connection_status)
-        if check_client_status(self.client):
-            self.connection_status.set_status(ConnectionStatus.Connected)
+        self.create_connection_request('192.168.0.100', 502)
 
         """
         菜单栏
@@ -361,7 +360,7 @@ class MainWindow(QMainWindow):
 
         feedback_sub_layout = QHBoxLayout()
 
-        self.record_status_manager = RecordStatusManager(self)
+        self.record_status_manager = RecordStatusManager(self, self.connection_status)
         self.record_status_manager.status_changed.connect(
             lambda status: self.feedback_chart.toggle_record_status(status))
         feedback_sub_layout.addWidget(self.record_status_manager)
@@ -465,18 +464,21 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "错误", "当前电机存在故障，请复位后再开始任务！")
                 return
 
-            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOn, True)):
+            if not process_write_response(
+                    self.client.write_coil(RegisterAddress.Coil.PowerOn, True), "保持寄存器"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOn, False))
+            process_write_response(
+                self.client.write_coil(RegisterAddress.Coil.PowerOn, False), "保持寄存器")
             sender.setText(MotorPowerStatus.PowerOff)
         elif sender.text() == MotorPowerStatus.PowerOff:
-            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOff, True)):
+            if not process_write_response(
+                    self.client.write_coil(RegisterAddress.Coil.PowerOff, True), "保持寄存器"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOff, False))
+            process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOff, False), "保持寄存器")
             if self.start_close_button.text() == MotorOperationStatus.Stop:  # 运行时断电处理
                 self._read_position_flag.set()
                 self.start_close_button.setText(MotorOperationStatus.Start)
@@ -489,11 +491,11 @@ class MainWindow(QMainWindow):
         """
         电机复位
         """
-        if not process_write_response(self.client.write_coil(RegisterAddress.Coil.Reset, True)):
+        if not process_write_response(self.client.write_coil(RegisterAddress.Coil.Reset, True), "线圈"):
             QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
             return
         time.sleep(0.05)
-        process_write_response(self.client.write_coil(RegisterAddress.Coil.Reset, False))
+        process_write_response(self.client.write_coil(RegisterAddress.Coil.Reset, False), "线圈")
 
     @Slot()
     def motor_move_to_target(self):
@@ -512,7 +514,8 @@ class MainWindow(QMainWindow):
             return
 
         packet = float_to_fixed(np.array([self.set_movement_distance.value()]), byte_order='>')
-        if not process_write_response(self.client.write_registers(RegisterAddress.Holding.TargetPos, packet.tolist())):
+        if not process_write_response(
+                self.client.write_registers(RegisterAddress.Holding.TargetPos, packet.tolist()), "线圈"):
             QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
             return
 
@@ -562,22 +565,27 @@ class MainWindow(QMainWindow):
             address = RegisterAddress.Holding.NumberOfInterval
             split_packet = split_array(packet)
             for sub_packet in split_packet:
-                if not process_write_response(self.client.write_registers(address, sub_packet)):
+                if not process_write_response(
+                        self.client.write_registers(address, sub_packet), "保持寄存器"):
                     QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                     return
                 address += len(sub_packet)
 
-            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.isWrite, True)):
+            if not process_write_response(
+                    self.client.write_coil(RegisterAddress.Coil.isWrite, True), "线圈"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(self.client.write_coil(RegisterAddress.Coil.isWrite, False))
+            process_write_response(
+                self.client.write_coil(RegisterAddress.Coil.isWrite, False), "线圈")
 
-            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.Start, True)):
+            if not process_write_response(
+                    self.client.write_coil(RegisterAddress.Coil.Start, True), "线圈"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(self.client.write_coil(RegisterAddress.Coil.Start, False))
+            process_write_response(
+                self.client.write_coil(RegisterAddress.Coil.Start, False), "线圈")
 
             if self._read_position_thread is not None and self._read_position_thread.is_alive():
                 self._read_position_flag.set()
@@ -591,11 +599,13 @@ class MainWindow(QMainWindow):
 
         # 停止运行
         elif sender.text() == MotorOperationStatus.Stop:
-            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.Stop, True)):
+            if not process_write_response(
+                    self.client.write_coil(RegisterAddress.Coil.Stop, True), "线圈"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(self.client.write_coil(RegisterAddress.Coil.Stop, False))
+            process_write_response(
+                self.client.write_coil(RegisterAddress.Coil.Stop, False), "线圈")
 
             self._read_position_flag.set()
             sender.setText(MotorOperationStatus.Start)
@@ -682,6 +692,7 @@ class MainWindow(QMainWindow):
         task = ConnectionTask(host, port)
         task.connect_result.connect(self.process_connection_result)
         self.thread_pool.start(TaskRunner(task))
+        logger.info(f"发送PLC连接请求，目标：{host}:{port}")
 
     @Slot(ModbusTcpClient)
     def process_connection_result(self, client: ModbusTcpClient):
@@ -694,6 +705,7 @@ class MainWindow(QMainWindow):
             self.connection_status.set_status(ConnectionStatus.Disconnected)
         else:
             self.connection_status.set_status(ConnectionStatus.Connected)
+            logger.info("PLC连接成功！")
 
             # 连接后首先检查一次
             result, response = process_read_response(
@@ -705,10 +717,12 @@ class MainWindow(QMainWindow):
             # 释放线程持续读取电机状态
             if self._status_monitor_thread is not None and self._status_monitor_thread.is_alive():
                 self._status_monitor_flag.set()
+                logger.info("存在旧的状态检测线程，等待结束...")
                 self._status_monitor_thread.join()
             self._status_monitor_flag.clear()
             self._status_monitor_thread = Thread(target=self._status_monitor, daemon=True)
             self._status_monitor_thread.start()
+            logger.info("状态检测线程已开启!")
 
     def _status_monitor(self):
         """
@@ -717,9 +731,8 @@ class MainWindow(QMainWindow):
         fail_count = 0
         while not self._status_monitor_flag.is_set():
             time.sleep(0.75)
-            result, response = process_read_response(
-                self.client.read_input_registers(RegisterAddress.Input.Status, count=1))
-            if result:
+            response = self.client.read_input_registers(RegisterAddress.Input.Status, count=1)
+            if response and not response.isError():
                 color, message = process_status_code(response.registers[0])
                 self.motor_status_manager.set_status(color, message)
                 fail_count = 0
