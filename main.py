@@ -148,45 +148,45 @@ class MainWindow(QMainWindow):
         motor_selection_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_setting_layout.addWidget(motor_selection_label, 1, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.motor_selection_box = QComboBox()
-        self.motor_selection_box.addItems(list(self.motor_pool.keys()))
-        self.motor_selection_box.currentTextChanged.connect(lambda name: (
+        motor_selection_box = QComboBox()
+        motor_selection_box.addItems(list(self.motor_pool.keys()))
+        motor_selection_box.currentTextChanged.connect(lambda name: (
             self.config.__setitem__("当前电机", name)
         ))
-        motor_setting_layout.addWidget(self.motor_selection_box, 1, 1)
+        motor_setting_layout.addWidget(motor_selection_box, 1, 1)
 
         zero_position_label = QLabel("零位：")
         zero_position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_setting_layout.addWidget(zero_position_label, 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.zero_position = QDoubleSpinBox()
-        self.zero_position.setRange(-10, 1000)
-        self.zero_position.setDecimals(1)
-        self.zero_position.setSingleStep(0.1)
-        self.zero_position.setValue(self.motor_pool[self.config["当前电机"]]["零位"])
-        self.zero_position.setSuffix(" mm")
-        self.zero_position.valueChanged.connect(lambda zero: (
+        zero_position = QDoubleSpinBox()
+        zero_position.setRange(-10, 1000)
+        zero_position.setDecimals(1)
+        zero_position.setSingleStep(0.1)
+        zero_position.setValue(self.motor_pool[self.config["当前电机"]]["零位"])
+        zero_position.setSuffix(" mm")
+        zero_position.valueChanged.connect(lambda zero: (
             self.motor_pool[self.config["当前电机"]].__setitem__("零位", zero),
             self.mock_chart.axis_y.setMin(zero),
         ))
-        motor_setting_layout.addWidget(self.zero_position, 2, 1)
+        motor_setting_layout.addWidget(zero_position, 2, 1)
 
         limit_position_label = QLabel("限位：")
         limit_position_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         motor_setting_layout.addWidget(limit_position_label, 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        self.limit_position = QDoubleSpinBox()
-        self.limit_position.setRange(0, 1000)
-        self.limit_position.setDecimals(1)
-        self.limit_position.setSingleStep(0.1)
-        self.limit_position.setValue(self.motor_pool[self.config["当前电机"]]["限位"])
-        self.limit_position.setSuffix(" mm")
-        self.limit_position.valueChanged.connect(lambda limit: (
+        limit_position = QDoubleSpinBox()
+        limit_position.setRange(0, 1000)
+        limit_position.setDecimals(1)
+        limit_position.setSingleStep(0.1)
+        limit_position.setValue(self.motor_pool[self.config["当前电机"]]["限位"])
+        limit_position.setSuffix(" mm")
+        limit_position.valueChanged.connect(lambda limit: (
             self.motor_pool[self.config["当前电机"]].__setitem__("限位", limit),
             self.set_offset.setMaximum(limit),
             self.mock_chart.axis_y.setMax(limit),
         ))
-        motor_setting_layout.addWidget(self.limit_position, 3, 1)
+        motor_setting_layout.addWidget(limit_position, 3, 1)
 
         motor_setting_frame.setLayout(motor_setting_layout)
         middle_layout.addWidget(motor_setting_frame)
@@ -279,10 +279,10 @@ class MainWindow(QMainWindow):
         self.power_button.clicked.connect(self.toggle_motor_power)
         motor_init_layout.addWidget(self.power_button, 1, 0)
 
-        self.reset_button = QPushButton()
-        self.reset_button.setText("复位")
-        self.reset_button.clicked.connect(self.motor_reset)
-        motor_init_layout.addWidget(self.reset_button, 1, 1)
+        reset_button = QPushButton()
+        reset_button.setText("复位")
+        reset_button.clicked.connect(self.motor_reset)
+        motor_init_layout.addWidget(reset_button, 1, 1)
 
         self.move_to_target_button = QPushButton()
         self.move_to_target_button.setText("移动至")
@@ -472,12 +472,14 @@ class MainWindow(QMainWindow):
             process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOn, False))
             sender.setText(MotorPowerStatus.PowerOff)
         elif sender.text() == MotorPowerStatus.PowerOff:
-            # TODO: 运行时断电的处理
             if not process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOff, True)):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
             process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOff, False))
+            if self.start_close_button.text() == MotorOperationStatus.Stop:  # 运行时断电处理
+                self._read_position_flag.set()
+                self.start_close_button.setText(MotorOperationStatus.Start)
             sender.setText(MotorPowerStatus.PowerOn)
         else:
             raise ValueError("错误的电源状态！")
@@ -577,9 +579,12 @@ class MainWindow(QMainWindow):
             time.sleep(0.05)
             process_write_response(self.client.write_coil(RegisterAddress.Coil.Start, False))
 
-            # self._read_position_thread = Thread(target=self._read_position, daemon=True)
-            # self._stop_thread_flag.clear()
-            # self._read_position_thread.start()
+            if self._read_position_thread is not None and self._read_position_thread.is_alive():
+                self._read_position_flag.set()
+                self._read_position_thread.join()
+            self._read_position_flag.clear()
+            self._read_position_thread = Thread(target=self._read_position, daemon=True)
+            self._read_position_thread.start()
 
             self.update_status("运行参数设置成功，电机开始运行！")
             sender.setText(MotorOperationStatus.Stop)
@@ -603,12 +608,8 @@ class MainWindow(QMainWindow):
         位置反馈线程函数
         """
         # TODO: 目前只能读取到期望位置
-        # while not self._read_position_flag.is_set():
-        #     result, response = process_read_response(
-        #         self.client.read_holding_registers(RegisterAddress.Position, count=2))
-        #     if result:
-        #         position = fixed_to_float(np.array(response.registers)).item()
-        #         self.feedback_chart.add_point(position)
+        while not self._read_position_flag.is_set():
+            time.sleep(0.1)
 
     @Slot()
     def read_waveform_file(self):
@@ -724,8 +725,13 @@ class MainWindow(QMainWindow):
                 fail_count = 0
             else:
                 fail_count += 1
-                if fail_count > 5:
+                if fail_count > 10:
+                    QMessageBox.critical(self, "错误", "与PLC的通信连接已断开，请检查！")
                     self.connection_status.set_status(ConnectionStatus.Disconnected)
+                    self.motor_status_manager.set_status(StatusLight.Color.Grey, "离线")
+                    if self.power_button.text() == MotorPowerStatus.PowerOff:  # 断连时电机还在通电
+                        self.power_button.setText(MotorPowerStatus.PowerOn)
+                    return
 
     @Slot()
     def update_mock_waveform_display(self):
@@ -756,17 +762,6 @@ class MainWindow(QMainWindow):
             )
             task.status_message.connect(self.update_status)
             self.thread_pool.start(TaskRunner(task))
-
-    @Slot()
-    def on_plc_disconnected(self):
-        """
-        PLC连接断开处理
-        """
-        # TODO: 异常断电处理
-        self._status_monitor_flag.is_set()
-        if self.start_close_button.text() == MotorOperationStatus.Stop:
-            self.start_close_button.clicked.emit()
-        QMessageBox.critical(self, "错误", "PLC异常断连，请检查！")
 
 
 if __name__ == "__main__":
