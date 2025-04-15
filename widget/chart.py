@@ -3,12 +3,13 @@ from typing import Sequence
 
 import numpy as np
 from PySide6.QtCharts import QChartView, QLineSeries, QChart, QValueAxis
-from PySide6.QtCore import Qt, QPointF, QMargins, Slot, QThreadPool
+from PySide6.QtCore import Qt, QPointF, QMargins, Slot, QThreadPool, Signal
 
 from task import SaveRecordTask, TaskRunner
 
 
 class FeedbackWaveformChart(QChartView):
+    status_message = Signal()
     thread_pool = QThreadPool.globalInstance()
     MAX_STORAGE = 1000  # 数据存储上限
     MIN_DISPLAY = 10    # 最小显示点数
@@ -118,12 +119,13 @@ class FeedbackWaveformChart(QChartView):
         self.record_status = status
         if not self.record_status:
             task = SaveRecordTask(self.record_data)
+            task.status_message.connect(self.status_message.emit)
             self.thread_pool.start(TaskRunner(task))
             self.record_data.clear()
 
 
 class MockWaveformChart(QChartView):
-    def __init__(self, config, motor_pool, y_range: Sequence[float]):
+    def __init__(self, config: dict, motor_pool, y_range: Sequence[float]):
         super().__init__()
         self.config = config
         self.motor_pool = motor_pool

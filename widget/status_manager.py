@@ -30,7 +30,6 @@ class MotorStatusManager(QWidget):
 
 class ConnectionStatusManager(QWidget):
     connection_request = Signal()
-    disconnected = Signal()
     color_map = {
         ConnectionStatus.Disconnected: StatusLight.Color.Red,
         ConnectionStatus.Connecting: StatusLight.Color.Orange,

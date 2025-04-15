@@ -1,4 +1,3 @@
-import pickle
 import sys
 import time
 from datetime import datetime
@@ -7,7 +6,6 @@ from threading import Event, Thread
 from typing import Optional
 
 import numpy as np
-import pandas as pd
 from PySide6.QtCore import Qt, QThreadPool, Slot, QDir
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
@@ -17,10 +15,10 @@ from pymodbus.client import ModbusTcpClient
 
 from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
                     ConnectionStatus)
-from communication import (float_to_fixed, split_array, process_write_response, fixed_to_float, check_client_status,
+from communication import (float_to_fixed, split_array, process_write_response, check_client_status,
                            process_read_response, process_status_code)
 from mathjax_server import run_server
-from task import ConnectionTask, TaskRunner
+from task import ConnectionTask, TaskRunner, SaveMockwaveformTask, SaveWaveformConfigTask, ReadWaveformConfigTask
 from widget.chart import FeedbackWaveformChart, MockWaveformChart
 from widget.connection_dialog import ConnectionDialog
 from widget.latex_board import LatexBoard
@@ -76,7 +74,6 @@ class MainWindow(QMainWindow):
         self.status_bar = self.statusBar()
         self.connection_status = ConnectionStatusManager(self)
         self.connection_status.connection_request.connect(self.open_connection_dialog)
-        self.connection_status.disconnected.connect(self.on_plc_disconnected)
         self.status_bar.addPermanentWidget(self.connection_status)
         if check_client_status(self.client):
             self.connection_status.set_status(ConnectionStatus.Connected)
@@ -379,6 +376,7 @@ class MainWindow(QMainWindow):
         feedback_layout.addLayout(feedback_sub_layout)
 
         self.feedback_chart = FeedbackWaveformChart()
+        self.feedback_chart.status_message.connect(self.update_status)
         feedback_layout.addWidget(self.feedback_chart)
 
         multi_widget_area.addTab(feedback_area, "反馈波形")
@@ -617,54 +615,51 @@ class MainWindow(QMainWindow):
         """
         从文件中读取波形数据功能实现
         """
-        dialog = QFileDialog(parent=self, acceptMode=QFileDialog.AcceptMode.AcceptOpen, defaultSuffix="dat",
-                             options=QFileDialog.Option.DontUseNativeDialog | QFileDialog.Option.ReadOnly)
-        dialog.setWindowTitle("读取波形")
-        dialog.setNameFilter("DAT Files (*.dat);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            parent=self,
+            caption="读取波形",
+            filter="DAT Files (*.dat);;All Files (*)",
+            selectedFilter="DAT Files (*.dat)",
+            options=QFileDialog.Option.ReadOnly
+        )
+        if path:
+            task = ReadWaveformConfigTask(path)
+            task.status_message.connect(self.update_status)
+            task.result.connect(self.on_read_waveform_file_done)
+            self.thread_pool.start(TaskRunner(task))
 
-        if dialog.exec() == QFileDialog.DialogCode.Accepted:
-            selected_files = dialog.selectedFiles()
-            if selected_files:
-                file_path = selected_files[0]
-
-                normalized_path = QDir.toNativeSeparators(file_path)  # 路径标准化处理（跨平台兼容）
-
-                try:
-                    with open(normalized_path, "rb") as file:
-                        self.config.update(pickle.load(file))
-                        self.method_selection.setCurrentText(self.config["插值方法"].value)
-                        self.set_offset.setValue(self.config["偏移量"])
-                        self.set_frequency.setValue(self.config["频率"])
-                        self.set_amplitude.setValue(int(self.config["幅值比例"] * 100))
-                        self.waveform_modulator.update()
-                        self.waveform_modulator.points_changed.emit()  # 发射信号触发公式绘制
-                    self.update_status(f"成功从 {normalized_path} 读取波形数据！")
-                except Exception as e:
-                    QMessageBox.critical(self, "警告", f"读取波形数据出错: {e}")
+    @Slot(dict)
+    def on_read_waveform_file_done(self, config: dict, path: str):
+        """
+        处理波形文件读取任务的结果
+        :param config: 读取的配置文件
+        :param path: 读取的路径
+        """
+        self.config.update(config)
+        self.method_selection.setCurrentIndex(self.config["插值方法"].value)
+        self.set_offset.setValue(self.config["偏移量"])
+        self.set_frequency.setValue(self.config["频率"])
+        self.set_amplitude.setValue(int(self.config["幅值比例"] * 100))
+        self.waveform_modulator.update()
+        self.waveform_modulator.points_changed.emit()
+        self.update_status(f"成功从 {QDir.toNativeSeparators(path)} 读取波形数据！")
 
     @Slot()
     def save_waveform_file(self):
         """
         保存波形数据到文件功能实现
         """
-        dialog = QFileDialog(parent=self, acceptMode=QFileDialog.AcceptMode.AcceptSave, defaultSuffix="dat",
-                             options=QFileDialog.Option.DontUseNativeDialog | QFileDialog.Option.ReadOnly)
-        dialog.setWindowTitle("保存波形")
-        dialog.setNameFilter("DAT Files (*.dat);;All Files (*)")
-
-        if dialog.exec() == QFileDialog.DialogCode.Accepted:
-            selected_files = dialog.selectedFiles()
-            if selected_files:
-                file_path = selected_files[0]
-
-                normalized_path = QDir.toNativeSeparators(file_path)  # 路径标准化处理（跨平台兼容）
-
-                try:
-                    with open(normalized_path, "wb") as f:
-                        pickle.dump(self.config, f)
-                    self.update_status(f"保存波形数据到 {normalized_path} ！")
-                except Exception as e:
-                    QMessageBox.critical(self, "错误", f"保存波形数据时出错: {e}")
+        path, _ = QFileDialog.getSaveFileName(
+            parent=self,
+            caption="保存波形",
+            filter="DAT Files (*.dat);;All Files (*)",
+            selectedFilter="DAT Files (*.dat)",
+            options=QFileDialog.Option.ReadOnly
+        )
+        if path:
+            task = SaveWaveformConfigTask(path, self.config)
+            task.status_message.connect(self.update_status)
+            self.thread_pool.start(TaskRunner(task))
 
     @Slot()
     def open_connection_dialog(self):
@@ -744,39 +739,23 @@ class MainWindow(QMainWindow):
         """
         导出虚拟波形
         """
-        dialog = QFileDialog(parent=self, acceptMode=QFileDialog.AcceptMode.AcceptSave, defaultSuffix="csv",
-                             options=QFileDialog.Option.DontUseNativeDialog | QFileDialog.Option.ReadOnly)
-        dialog.setWindowTitle("导出虚拟波形")
-        dialog.setNameFilter("CSV Files (*.csv);;All Files (*)")
-
-        if dialog.exec() == QFileDialog.DialogCode.Accepted:
-            selected_files = dialog.selectedFiles()
-            if selected_files:
-                file_path = selected_files[0]
-
-                normalized_path = QDir.toNativeSeparators(file_path)  # 路径标准化处理（跨平台兼容）
-
-                try:
-                    result = []
-                    for x, y in self.waveform_modulator.interpolated_points:
-                        # X坐标变换
-                        processed_x = x / self.config.get("频率")
-
-                        # Y坐标变换
-                        absolute_y = y * self.motor_pool.get(self.motor_selection_box.currentText()).get("导轨长度")  # 换算绝对坐标
-                        processed_y = (absolute_y * self.config.get("幅值比例")) + self.config.get("偏移量")  # 偏移和增幅
-
-                        result.append(
-                            (processed_x, max(self.mock_chart.axis_y.min(), min(processed_y, self.mock_chart.axis_y.max()))))
-
-                    df = pd.DataFrame(result, columns=['x', 'y'])
-                    df.astype({'x': 'float32', 'y': 'float32'}).to_csv(
-                        normalized_path,
-                        index=False,
-                        float_format='%.4f'  # 统一小数位数
-                    )
-                except Exception as e:
-                    QMessageBox.critical(self, "错误", f"导出虚拟波形时出错: {e}！")
+        path, _ = QFileDialog.getSaveFileName(
+            parent=self,
+            caption="导出虚拟波形",
+            filter="CSV Files (*.csv);;All Files (*)",
+            selectedFilter="CSV Files (*.csv)",
+            options=QFileDialog.Option.ReadOnly
+        )
+        if path:
+            task = SaveMockwaveformTask(
+                QDir.toNativeSeparators(path),
+                self.motor_pool, self.config,
+                self.mock_chart.axis_y.max(),
+                self.mock_chart.axis_y.min(),
+                self.waveform_modulator.interpolated_points
+            )
+            task.status_message.connect(self.update_status)
+            self.thread_pool.start(TaskRunner(task))
 
     @Slot()
     def on_plc_disconnected(self):

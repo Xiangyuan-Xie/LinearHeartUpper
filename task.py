@@ -1,7 +1,9 @@
-from typing import Sequence, Any, List
+import pickle
+from typing import Sequence, Any
 
+import numpy as np
 import pandas as pd
-from PySide6.QtCore import QRunnable, QObject, Signal
+from PySide6.QtCore import QRunnable, QObject, Signal, QDir
 from pymodbus.client import ModbusTcpClient
 from scipy.interpolate import CubicSpline, Akima1DInterpolator
 
@@ -137,14 +139,87 @@ class ConnectionTask(QObject):
 
 
 class SaveRecordTask(QObject):
-    def __init__(self, record_data: List[float]):
+    status_message = Signal(str)
+
+    def __init__(self, record_data: Sequence[float]):
         super().__init__()
         self.record_data = record_data.copy()
 
     def run(self):
-        df = pd.DataFrame(self.record_data, columns=["Position"])
-        df.to_csv(
-            "output.csv",
-            index=False,
-            float_format='%.4f'
-        )
+        try:
+            df = pd.DataFrame(self.record_data, columns=["Position"])
+            df.to_csv(
+                "output.csv",
+                index=False,
+                float_format='%.4f'
+            )
+            self.status_message.emit(f"保存录制数据成功！")
+        except Exception as e:
+            self.status_message.emit(f"保存录制数据时发生错误：{e}")
+
+
+class SaveMockwaveformTask(QObject):
+    status_message = Signal(str)
+
+    def __init__(self, path: str, motor_pool: dict, config: dict, y_max: float, y_min: float,
+                 points: Sequence[Sequence[float]]):
+        super().__init__()
+        self.path = path
+        self.motor_pool = motor_pool.copy()
+        self.config = config.copy()
+        self.y_max = y_max
+        self.y_min = y_min
+        self.points = points.copy()
+
+    def run(self):
+        try:
+            motor = self.motor_pool[self.config["当前电机"]]
+            zero_pos, limit_pos = motor["零位"], motor["限位"]
+            freq, scale, offset = self.config["频率"], self.config["幅值比例"], self.config["偏移量"]
+
+            result = np.array(self.points)
+            result[:, 0] /= freq
+            result[:, 1] = (result[:, 1] * (limit_pos - zero_pos) - zero_pos) * scale + offset
+            interpolated_points = np.clip(result, self.y_min, self.y_max)
+
+            df = pd.DataFrame(interpolated_points, columns=['x', 'y'])
+            df.astype({'x': 'float32', 'y': 'float32'}).to_csv(
+                self.path, index=False, float_format='%.4f'
+            )
+            self.status_message.emit(f"保存虚拟波形到 {QDir.toNativeSeparators(self.path)}！")
+        except Exception as e:
+            self.status_message.emit(f"保存虚拟波形时发生错误：{e}")
+
+
+class SaveWaveformConfigTask(QObject):
+    status_message = Signal(str)
+
+    def __init__(self, path: str, config: dict):
+        super().__init__()
+        self.path = path
+        self.config = config.copy()
+
+    def run(self):
+        try:
+            with open(QDir.toNativeSeparators(self.path), "wb") as f:
+                pickle.dump(self.config, f)
+            self.status_message.emit(f"保存波形数据到 {QDir.toNativeSeparators(self.path)} ！")
+        except Exception as e:
+            self.status_message.emit(f"保存波形数据时出错: {e}")
+
+
+class ReadWaveformConfigTask(QObject):
+    status_message = Signal(str)
+    result = Signal(dict, str)
+
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = path
+
+    def run(self):
+        try:
+            with open(QDir.toNativeSeparators(self.path), "rb") as f:
+                config = pickle.load(f)
+            self.result.emit(config, self.path)
+        except Exception as e:
+            self.status_message.emit(f"读取波形数据时出错: {e}")
