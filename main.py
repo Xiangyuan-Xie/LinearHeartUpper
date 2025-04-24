@@ -1,8 +1,7 @@
 import sys
 import time
 from datetime import datetime
-from multiprocessing import Process
-from threading import Event, Thread
+from multiprocessing import Process, Event
 from typing import Optional
 
 import numpy as np
@@ -48,12 +47,11 @@ class MainWindow(QMainWindow):
         }
         self.thread_pool = QThreadPool.globalInstance()
 
+        self._mathjax_server_process = Process(target=run_server, daemon=True)
+        self._mathjax_server_process.start()
+
         self.client: Optional[ModbusTcpClient] = None
-
-        self._read_position_thread: Optional[Thread] = None
-        self._read_position_flag = Event()
-
-        self._status_monitor_thread: Optional[Thread] = None
+        self._status_monitor_process: Optional[Process] = None
         self._status_monitor_flag = Event()
 
         # 设置窗口标题
@@ -480,7 +478,6 @@ class MainWindow(QMainWindow):
             time.sleep(0.05)
             process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOff, False), "保持寄存器")
             if self.start_close_button.text() == MotorOperationStatus.Stop:  # 运行时断电处理
-                self._read_position_flag.set()
                 self.start_close_button.setText(MotorOperationStatus.Start)
             sender.setText(MotorPowerStatus.PowerOn)
         else:
@@ -587,13 +584,6 @@ class MainWindow(QMainWindow):
             process_write_response(
                 self.client.write_coil(RegisterAddress.Coil.Start, False), "线圈")
 
-            if self._read_position_thread is not None and self._read_position_thread.is_alive():
-                self._read_position_flag.set()
-                self._read_position_thread.join()
-            self._read_position_flag.clear()
-            self._read_position_thread = Thread(target=self._read_position, daemon=True)
-            self._read_position_thread.start()
-
             self.update_status("运行参数设置成功，电机开始运行！")
             sender.setText(MotorOperationStatus.Stop)
 
@@ -606,20 +596,11 @@ class MainWindow(QMainWindow):
             time.sleep(0.05)
             process_write_response(
                 self.client.write_coil(RegisterAddress.Coil.Stop, False), "线圈")
-
-            self._read_position_flag.set()
+            self.update_status("电机已停止运行！")
             sender.setText(MotorOperationStatus.Start)
 
         else:
             raise ValueError("错误的电机运行状态！")
-
-    def _read_position(self):
-        """
-        位置反馈线程函数
-        """
-        # TODO: 目前只能读取到期望位置
-        while not self._read_position_flag.is_set():
-            time.sleep(0.1)
 
     @Slot()
     def read_waveform_file(self):
@@ -703,6 +684,7 @@ class MainWindow(QMainWindow):
         self.client = client
         if client is None:
             self.connection_status.set_status(ConnectionStatus.Disconnected)
+            logger.info("PLC连接失败！")
         else:
             self.connection_status.set_status(ConnectionStatus.Connected)
             logger.info("PLC连接成功！")
@@ -715,13 +697,13 @@ class MainWindow(QMainWindow):
                 self.motor_status_manager.set_status(color, message)
 
             # 释放线程持续读取电机状态
-            if self._status_monitor_thread is not None and self._status_monitor_thread.is_alive():
+            if self._status_monitor_process is not None and self._status_monitor_process.is_alive():
                 self._status_monitor_flag.set()
                 logger.info("存在旧的状态检测线程，等待结束...")
-                self._status_monitor_thread.join()
+                self._status_monitor_process.join()
             self._status_monitor_flag.clear()
-            self._status_monitor_thread = Thread(target=self._status_monitor, daemon=True)
-            self._status_monitor_thread.start()
+            self._status_monitor_process = Process(target=self._status_monitor, daemon=True)
+            self._status_monitor_process.start()
             logger.info("状态检测线程已开启!")
 
     def _status_monitor(self):
@@ -729,17 +711,51 @@ class MainWindow(QMainWindow):
         状态监测线程函数
         """
         fail_count = 0
+        buffer_size = 2000
         while not self._status_monitor_flag.is_set():
-            time.sleep(0.75)
-            response = self.client.read_input_registers(RegisterAddress.Input.Status, count=1)
-            if response and not response.isError():
-                color, message = process_status_code(response.registers[0])
+            # 状态字
+            status_response = self.client.read_input_registers(RegisterAddress.Input.Status, count=1)
+            if status_response and not status_response.isError():
+                color, message = process_status_code(status_response.registers[0])
                 self.motor_status_manager.set_status(color, message)
+                fail_count = 0
+            else:
+                fail_count += 1
+
+            # 实时位置反馈
+            header_response = self.client.read_input_registers(RegisterAddress.Input.Header, count=2)
+            if header_response and not header_response.isError():
+                header = header_response.registers[0]
+                tailer = header_response.registers[1]
+                counter = (header - tailer + buffer_size) % buffer_size
+                if counter <= 0:
+                    continue
+
+                position = []
+                remaining = counter
+                current_address = tailer
+                while remaining > 0:
+                    read_length = min(120, remaining)
+                    current_address = (tailer + (counter - remaining)) % buffer_size
+                    if current_address + read_length > buffer_size:
+                        first_segment = buffer_size - current_address
+                        pos_response1 = self.client.read_input_registers(current_address, count=first_segment)
+                        pos_response2 = self.client.read_input_registers(0, count=read_length - first_segment)
+                        position.extend(pos_response1.registers + pos_response2.registers)
+                    else:
+                        pos_response = self.client.read_input_registers(current_address, count=read_length)
+                        position.extend(pos_response.registers)
+                    remaining -= read_length
+
+                tail_response = self.client.write_registers(RegisterAddress.Holding.Tailer, [current_address])
+                if tail_response and not tail_response.isError():
+                    self.feedback_chart.add_points(position)
                 fail_count = 0
             else:
                 fail_count += 1
                 if fail_count > 10:
                     QMessageBox.critical(self, "错误", "与PLC的通信连接已断开，请检查！")
+                    logger.error("PLC通信连接异常断开！")
                     self.connection_status.set_status(ConnectionStatus.Disconnected)
                     self.motor_status_manager.set_status(StatusLight.Color.Grey, "离线")
                     if self.power_button.text() == MotorPowerStatus.PowerOff:  # 断连时电机还在通电
@@ -778,8 +794,6 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
-    mathjax = Process(target=run_server, daemon=True)
-    mathjax.start()
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

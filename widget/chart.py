@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Sequence
+from typing import Sequence, Union
 
 import numpy as np
 from PySide6.QtCharts import QChartView, QLineSeries, QChart, QValueAxis
@@ -42,14 +42,17 @@ class FeedbackWaveformChart(QChartView):
         self.chart.addAxis(self.y_axis, Qt.AlignmentFlag.AlignLeft)
         self.waveform_series.attachAxis(self.y_axis)
 
-    def add_point(self, point: float):
+    def add_points(self, points: Union[float, Sequence[float]]) -> None:
         """
         向数据池中增加新数据点并触发更新
-        :param point: 新数据点
+        :param points: 新数据点
         """
-        self.data_pool.append(point)
+        if not points:
+            return
+
+        self.data_pool.extend(points)
         if self.record_status:
-            self.record_data.append(point)
+            self.record_data.append(points)
         self._refresh_visualization()
         self._dynamic_scale_adjustment()
 

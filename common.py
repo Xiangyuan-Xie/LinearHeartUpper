@@ -41,14 +41,17 @@ class RegisterAddress:
     # 输入寄存器
     class Input(IntEnum):
         Status = 0
-        Position = 1
+        Header = 1
+        Position_Start = 3
+        Position_End = 2003
 
     # 保持寄存器
     class Holding(IntEnum):
         TargetPos = 0
         NumberOfInterval = 2
         Frequency = 3
-        Coefficients = 5
+        Tailer = 5
+        Coefficients = 6
 
 
 class MotorPowerStatus(StrEnum):
