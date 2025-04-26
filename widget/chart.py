@@ -38,7 +38,7 @@ class FeedbackWaveformChart(QChartView):
         self.waveform_series.attachAxis(self.x_axis)
 
         self.y_axis = QValueAxis()
-        self.y_axis.setRange(-1, 1)
+        self.y_axis.setRange(-2, 22)  # TODO: 之后改成与行程相同
         self.chart.addAxis(self.y_axis, Qt.AlignmentFlag.AlignLeft)
         self.waveform_series.attachAxis(self.y_axis)
 
@@ -54,7 +54,7 @@ class FeedbackWaveformChart(QChartView):
         if self.record_status:
             self.record_data.append(points)
         self._refresh_visualization()
-        self._dynamic_scale_adjustment()
+        # self._dynamic_scale_adjustment()
 
     def adjust_display_scope(self, new_scope: int):
         """
@@ -64,7 +64,7 @@ class FeedbackWaveformChart(QChartView):
         if self._display_range != new_scope:
             self._display_range = new_scope
             self._refresh_visualization(force_redraw=True)
-            self._dynamic_scale_adjustment()
+            # self._dynamic_scale_adjustment()
 
     def _refresh_visualization(self, force_redraw=False):
         """

@@ -36,21 +36,21 @@ class RegisterAddress:
         Reset = 2
         Start = 3
         Stop = 4
-        isWrite = 5
+        isWriteCoefficients = 5
+        isWriteTarget = 6
 
     # 输入寄存器
     class Input(IntEnum):
         Status = 0
         Header = 1
-        Position_Start = 3
-        Position_End = 2003
+        Position_Start = 2
 
     # 保持寄存器
     class Holding(IntEnum):
         TargetPos = 0
-        NumberOfInterval = 2
-        Frequency = 3
-        Tailer = 5
+        Tailer = 2
+        NumberOfInterval = 3
+        Frequency = 4
         Coefficients = 6
 
 

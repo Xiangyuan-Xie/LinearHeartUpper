@@ -1,7 +1,8 @@
 import sys
 import time
 from datetime import datetime
-from multiprocessing import Process, Event
+from multiprocessing import Process
+from threading import Thread, Event, Lock
 from typing import Optional
 
 import numpy as np
@@ -16,7 +17,7 @@ from pymodbus.client import ModbusTcpClient
 from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
                     ConnectionStatus)
 from communication import (float_to_fixed, split_array, process_write_response, process_read_response,
-                           process_status_code)
+                           process_status_code, fixed_to_float)
 from mathjax_server import run_server
 from task import ConnectionTask, TaskRunner, SaveMockwaveformTask, SaveWaveformConfigTask, ReadWaveformConfigTask
 from widget.chart import FeedbackWaveformChart, MockWaveformChart
@@ -42,7 +43,7 @@ class MainWindow(QMainWindow):
         self.motor_pool = {
             "1号电机": {
                 "零位": 0.0,
-                "限位": 60.0
+                "限位": 20.0
             }
         }
         self.thread_pool = QThreadPool.globalInstance()
@@ -50,8 +51,9 @@ class MainWindow(QMainWindow):
         self._mathjax_server_process = Process(target=run_server, daemon=True)
         self._mathjax_server_process.start()
 
+        self.lock = Lock()
         self.client: Optional[ModbusTcpClient] = None
-        self._status_monitor_process: Optional[Process] = None
+        self._status_monitor_thread: Optional[Thread] = None
         self._status_monitor_flag = Event()
 
         # 设置窗口标题
@@ -516,6 +518,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
             return
 
+        if not process_write_response(
+                self.client.write_coil(RegisterAddress.Coil.isWriteTarget, True), "线圈"):
+            QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
+            return
+        time.sleep(0.05)
+        process_write_response(
+            self.client.write_coil(RegisterAddress.Coil.isWriteTarget, False), "线圈")
+
     @Slot()
     def toggle_motor_operation(self):
         """
@@ -569,12 +579,12 @@ class MainWindow(QMainWindow):
                 address += len(sub_packet)
 
             if not process_write_response(
-                    self.client.write_coil(RegisterAddress.Coil.isWrite, True), "线圈"):
+                    self.client.write_coil(RegisterAddress.Coil.isWriteCoefficients, True), "线圈"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
             process_write_response(
-                self.client.write_coil(RegisterAddress.Coil.isWrite, False), "线圈")
+                self.client.write_coil(RegisterAddress.Coil.isWriteCoefficients, False), "线圈")
 
             if not process_write_response(
                     self.client.write_coil(RegisterAddress.Coil.Start, True), "线圈"):
@@ -690,20 +700,19 @@ class MainWindow(QMainWindow):
             logger.info("PLC连接成功！")
 
             # 连接后首先检查一次
-            result, response = process_read_response(
-                self.client.read_input_registers(RegisterAddress.Input.Status, count=1))
-            if result:
+            response = self.client.read_input_registers(RegisterAddress.Input.Status, count=1)
+            if response and not response.isError():
                 color, message = process_status_code(response.registers[0])
                 self.motor_status_manager.set_status(color, message)
 
             # 释放线程持续读取电机状态
-            if self._status_monitor_process is not None and self._status_monitor_process.is_alive():
+            if self._status_monitor_thread is not None and self._status_monitor_thread.is_alive():
                 self._status_monitor_flag.set()
                 logger.info("存在旧的状态检测线程，等待结束...")
-                self._status_monitor_process.join()
+                self._status_monitor_thread.join()
             self._status_monitor_flag.clear()
-            self._status_monitor_process = Process(target=self._status_monitor, daemon=True)
-            self._status_monitor_process.start()
+            self._status_monitor_thread = Thread(target=self._status_monitor, daemon=True)
+            self._status_monitor_thread.start()
             logger.info("状态检测线程已开启!")
 
     def _status_monitor(self):
@@ -711,13 +720,17 @@ class MainWindow(QMainWindow):
         状态监测线程函数
         """
         fail_count = 0
-        buffer_size = 2000
+        buffer_size = 1000
         while not self._status_monitor_flag.is_set():
+            time.sleep(0.1)
+
             # 状态字
             status_response = self.client.read_input_registers(RegisterAddress.Input.Status, count=1)
             if status_response and not status_response.isError():
                 color, message = process_status_code(status_response.registers[0])
                 self.motor_status_manager.set_status(color, message)
+                if status_response.registers[0] == 5:
+                    self.start_close_button.setText(MotorOperationStatus.Stop)
                 fail_count = 0
             else:
                 fail_count += 1
@@ -731,25 +744,28 @@ class MainWindow(QMainWindow):
                 if counter <= 0:
                     continue
 
-                position = []
+                encoded_position = []
                 remaining = counter
-                current_address = tailer
                 while remaining > 0:
-                    read_length = min(120, remaining)
+                    read_length = min(60, remaining)
                     current_address = (tailer + (counter - remaining)) % buffer_size
                     if current_address + read_length > buffer_size:
                         first_segment = buffer_size - current_address
-                        pos_response1 = self.client.read_input_registers(current_address, count=first_segment)
-                        pos_response2 = self.client.read_input_registers(0, count=read_length - first_segment)
-                        position.extend(pos_response1.registers + pos_response2.registers)
+                        pos_response1 = self.client.read_input_registers(
+                            RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * first_segment)
+                        pos_response2 = self.client.read_input_registers(
+                            RegisterAddress.Input.Position_Start, count= 2 * (read_length - first_segment))
+                        encoded_position.extend(pos_response1.registers + pos_response2.registers)
                     else:
-                        pos_response = self.client.read_input_registers(current_address, count=read_length)
-                        position.extend(pos_response.registers)
+                        pos_response = self.client.read_input_registers(
+                            RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * read_length)
+                        encoded_position.extend(pos_response.registers)
                     remaining -= read_length
 
-                tail_response = self.client.write_registers(RegisterAddress.Holding.Tailer, [current_address])
+                tail_response = self.client.write_registers(RegisterAddress.Holding.Tailer, [header])
                 if tail_response and not tail_response.isError():
-                    self.feedback_chart.add_points(position)
+                    decoded_position = fixed_to_float(np.array(encoded_position))
+                    self.feedback_chart.add_points(decoded_position.tolist())
                 fail_count = 0
             else:
                 fail_count += 1
