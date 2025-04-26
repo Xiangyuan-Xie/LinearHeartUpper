@@ -16,8 +16,7 @@ from pymodbus.client import ModbusTcpClient
 
 from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
                     ConnectionStatus)
-from communication import (float_to_fixed, split_array, process_write_response, process_read_response,
-                           process_status_code, fixed_to_float)
+from communication import (float_to_fixed, split_array, process_write_response, process_status_code, fixed_to_float)
 from mathjax_server import run_server
 from task import ConnectionTask, TaskRunner, SaveMockwaveformTask, SaveWaveformConfigTask, ReadWaveformConfigTask
 from widget.chart import FeedbackWaveformChart, MockWaveformChart
