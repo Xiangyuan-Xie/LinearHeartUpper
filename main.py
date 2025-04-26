@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
         zero_position.setSuffix(" mm")
         zero_position.valueChanged.connect(lambda zero: (
             self.motor_pool[self.config["当前电机"]].__setitem__("零位", zero),
-            self.mock_chart.axis_y.setMin(zero),
+            self.adjust_y_scale(zero_position=zero)
         ))
         motor_setting_layout.addWidget(zero_position, 2, 1)
 
@@ -181,8 +181,7 @@ class MainWindow(QMainWindow):
         limit_position.setSuffix(" mm")
         limit_position.valueChanged.connect(lambda limit: (
             self.motor_pool[self.config["当前电机"]].__setitem__("限位", limit),
-            self.set_offset.setMaximum(limit),
-            self.mock_chart.axis_y.setMax(limit),
+            self.adjust_y_scale(limit_position=limit)
         ))
         motor_setting_layout.addWidget(limit_position, 3, 1)
 
@@ -373,7 +372,8 @@ class MainWindow(QMainWindow):
 
         feedback_layout.addLayout(feedback_sub_layout)
 
-        self.feedback_chart = FeedbackWaveformChart()
+        self.feedback_chart = FeedbackWaveformChart((self.motor_pool[self.config["当前电机"]]["零位"],
+                                                     self.motor_pool[self.config["当前电机"]]["限位"]))
         self.feedback_chart.status_message.connect(self.update_status)
         feedback_layout.addWidget(self.feedback_chart)
 
@@ -806,6 +806,20 @@ class MainWindow(QMainWindow):
             )
             task.status_message.connect(self.update_status)
             self.thread_pool.start(TaskRunner(task))
+
+    def adjust_y_scale(self, zero_position: float=None, limit_position: float=None):
+        """
+        波形视图坐标轴自适应
+        :param zero_position: 导轨零位
+        :param limit_position: 导轨限位
+        """
+        if zero_position is None:
+            zero_position = self.motor_pool[self.config["当前电机"]]["零位"]
+        if limit_position is None:
+            limit_position = self.motor_pool[self.config["当前电机"]]["限位"]
+
+        self.feedback_chart.adjust_y_scale(zero_position, limit_position)
+        self.mock_chart.adjust_y_scale(zero_position, limit_position)
 
 
 if __name__ == "__main__":

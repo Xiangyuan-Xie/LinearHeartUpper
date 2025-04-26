@@ -15,7 +15,7 @@ class FeedbackWaveformChart(QChartView):
     MIN_DISPLAY = 10    # 最小显示点数
     MAX_DISPLAY = 1000  # 最大显示点数
 
-    def __init__(self, display_window=100):
+    def __init__(self, y_range: Sequence[float], display_window=100):
         super().__init__()
         self.data_pool = deque(maxlen=self.MAX_STORAGE)
 
@@ -38,7 +38,7 @@ class FeedbackWaveformChart(QChartView):
         self.waveform_series.attachAxis(self.x_axis)
 
         self.y_axis = QValueAxis()
-        self.y_axis.setRange(-2, 22)  # TODO: 之后改成与行程相同
+        self.adjust_y_scale(y_range[0], y_range[1])
         self.chart.addAxis(self.y_axis, Qt.AlignmentFlag.AlignLeft)
         self.waveform_series.attachAxis(self.y_axis)
 
@@ -54,7 +54,6 @@ class FeedbackWaveformChart(QChartView):
         if self.record_status:
             self.record_data.append(points)
         self._refresh_visualization()
-        # self._dynamic_scale_adjustment()
 
     def adjust_display_scope(self, new_scope: int):
         """
@@ -64,7 +63,6 @@ class FeedbackWaveformChart(QChartView):
         if self._display_range != new_scope:
             self._display_range = new_scope
             self._refresh_visualization(force_redraw=True)
-            # self._dynamic_scale_adjustment()
 
     def _refresh_visualization(self, force_redraw=False):
         """
@@ -83,19 +81,12 @@ class FeedbackWaveformChart(QChartView):
             self._update_x_axis(valid_samples)
             self.chart.update()
 
-    def _dynamic_scale_adjustment(self):
+    def adjust_y_scale(self, y_min: float, y_max: float):
         """
-        坐标轴自适应
+        坐标Y轴自适应(动态边距)
+        :param y_min: 位置最小值
+        :param y_max: 位置最大值
         """
-        if not self.data_pool:
-            return
-
-        # 计算当前显示窗口内的数据特征
-        visible_data = list(self.data_pool)[-self._display_range:]
-        y_min = min(visible_data)
-        y_max = max(visible_data)
-
-        # 动态边距
         data_span = y_max - y_min
         if data_span == 0:  # 处理零波动场景
             padding = max(abs(y_min) * 0.2, 0.1)
@@ -149,7 +140,7 @@ class MockWaveformChart(QChartView):
         self.waveform_series.attachAxis(self.axis_x)
 
         self.axis_y = QValueAxis()
-        self.axis_y.setRange(y_range[0], y_range[1])  # Y轴范围
+        self.adjust_y_scale(y_range[0], y_range[1])  # Y轴范围
         self.axis_y.setTickCount(9)  # Y轴刻度线数量
         self.chart.addAxis(self.axis_y, Qt.AlignmentFlag.AlignLeft)
         self.waveform_series.attachAxis(self.axis_y)
@@ -191,3 +182,18 @@ class MockWaveformChart(QChartView):
             for x, y in clipped[:, :2]
         ])
         self.chart.update()
+
+    def adjust_y_scale(self, y_min: float, y_max: float):
+        """
+        坐标Y轴自适应(动态边距)
+        :param y_min: 位置最小值
+        :param y_max: 位置最大值
+        """
+        data_span = y_max - y_min
+        if data_span == 0:  # 处理零波动场景
+            padding = max(abs(y_min) * 0.2, 0.1)
+        else:
+            padding = data_span * 0.15  # 基础边距15%
+            padding = max(padding, data_span * 0.05)  # 最小边距5%
+
+        self.axis_y.setRange(y_min - padding, y_max + padding)
