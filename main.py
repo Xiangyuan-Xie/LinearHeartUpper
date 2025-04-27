@@ -459,6 +459,10 @@ class MainWindow(QMainWindow):
         """
         sender = self.sender()
         if sender.text() == MotorPowerStatus.PowerOn:
+            if self.motor_status_manager.status_light != StatusLight.Color.Red:
+                QMessageBox.critical(self, "错误", "当前未连接PLC，请连接后再操作！")
+                return
+
             if self.motor_status_manager.get_color() == StatusLight.Color.Red:
                 QMessageBox.critical(self, "错误", "当前电机存在故障，请复位后再开始任务！")
                 return
@@ -489,6 +493,10 @@ class MainWindow(QMainWindow):
         """
         电机复位
         """
+        if self.motor_status_manager.status_light != StatusLight.Color.Red:
+            QMessageBox.critical(self, "错误", "当前未连接PLC，请连接后再操作！")
+            return
+
         if not process_write_response(self.client.write_coil(RegisterAddress.Coil.Reset, True), "线圈"):
             QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
             return
