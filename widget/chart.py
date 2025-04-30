@@ -5,6 +5,7 @@ import numpy as np
 from PySide6.QtCharts import QChartView, QLineSeries, QChart, QValueAxis
 from PySide6.QtCore import Qt, QPointF, QMargins, Slot, QThreadPool, Signal
 
+from common import waveform_mapping
 from task import SaveRecordTask, TaskRunner
 
 
@@ -123,7 +124,6 @@ class MockWaveformChart(QChartView):
         super().__init__()
         self.config = config
         self.motor_pool = motor_pool
-        self.points = None
 
         self.chart = QChart()
         self.setChart(self.chart)
@@ -145,42 +145,10 @@ class MockWaveformChart(QChartView):
         self.chart.addAxis(self.axis_y, Qt.AlignmentFlag.AlignLeft)
         self.waveform_series.attachAxis(self.axis_y)
 
-    def update_data(self, new_samples: Sequence[Sequence[float]]):
-        if not new_samples:
-            return
-
-        # 参数提取
-        motor = self.motor_pool[self.config["当前电机"]]
-        zero_pos, limit_pos = motor["零位"], motor["限位"]
-        freq, scale, offset = self.config["频率"], self.config["幅值比例"], self.config["偏移量"]
-
-        # 向量化初始处理
-        matrix = np.array(new_samples, dtype=np.float32)
-        matrix[:, 0] /= freq
-        matrix[:, 1] = (matrix[:, 1] * (limit_pos - zero_pos) - zero_pos) * scale + offset
-
-        # 时间维度展开
-        period = int(self.axis_x.max() * freq)
-        deltas = np.arange(1, period + 1) / freq
-        time_cube = matrix[:, 0][np.newaxis, :] + deltas[:, np.newaxis]
-        expanded_time = time_cube.reshape(-1, 1)
-        expanded_value = np.tile(matrix[:, 1], period).reshape(-1, 1)
-
-        # 预分配内存合并
-        total_rows = matrix.shape[0] * (period + 1)
-        prealloc = np.empty((total_rows, 2), dtype=np.float32)
-        prealloc[:matrix.shape[0]] = matrix
-        prealloc[matrix.shape[0]:] = np.hstack([expanded_time, expanded_value])
-
-        # 边界裁剪优化
-        mask = (prealloc[:, 0] >= self.axis_x.min()) & (prealloc[:, 0] <= self.axis_x.max())
-        clipped = prealloc[mask]
-
-        # 数据更新
-        self.waveform_series.replace([
-            QPointF(x, np.clip(y, self.axis_y.min(), self.axis_y.max()))
-            for x, y in clipped[:, :2]
-        ])
+    def update_data(self, new_samples: np.ndarray):
+        mapping_points = np.clip(
+            waveform_mapping(self.config, self.motor_pool, new_samples), self.axis_y.min(), self.axis_y.max())
+        self.waveform_series.replace([QPointF(x, y) for x, y in mapping_points])
         self.chart.update()
 
     def adjust_y_scale(self, y_min: float, y_max: float):

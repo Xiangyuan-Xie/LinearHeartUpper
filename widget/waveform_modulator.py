@@ -1,5 +1,5 @@
 import enum
-from typing import Dict, Any, Tuple, List
+from typing import Sequence, Tuple
 
 import numpy as np
 from PySide6.QtCore import Signal
@@ -19,10 +19,10 @@ class WaveformModulator(QWidget):
     points_changed = Signal()
     waveform_status = Signal(WaveformStatus)
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict):
         super().__init__()
         self.config = config  # 用户配置
-        self.interpolated_points = []  # 插值曲线点坐标
+        self.interpolated_points = np.zeros((1001, 2), dtype=np.float32)  # 曲线点集
         self.x_range = 1.0  # X轴范围
         self.y_range = 1.0  # Y轴范围
         self.static_pixmap = None  # 缓存静态内容
@@ -93,7 +93,7 @@ class WaveformModulator(QWidget):
         # 绘制插值曲线
         if len(self.config["插值点集"]) > 2:
             self.interpolated_points = self.interpolate(self.config["插值方法"], self.config["插值点集"])  # 计算插值曲线点集
-            if self.interpolated_points:
+            if self.interpolated_points.size > 0:
                 painter.setPen(QPen(QColor(0, 0, 255), 2))  # 蓝色
 
                 path = QPainterPath()
@@ -116,14 +116,13 @@ class WaveformModulator(QWidget):
         painter.end()
 
     @staticmethod
-    def interpolate(method: Interpolation, points: List[Tuple[float, float]],
-                    num_points: int=1000) -> List[Tuple[float, float]]:
+    def interpolate(method: Interpolation, points: Sequence[Sequence[float]], num_points: int=1001) -> np.ndarray:
         """
         插值计算功能实现
         :param method: 插值方法
         :param points: 插值点集合
         :param num_points: 绘制插值曲线点的数量，默认为1000
-        :return: list(zip(x_new, y_new))，每个元素代表一个插值点
+        :return: np.ndarray，每个元素代表一个插值点
         """
         assert len(points) > 2, "插值点数量不满足大于2个！"
 
@@ -133,7 +132,7 @@ class WaveformModulator(QWidget):
         x_new = np.linspace(min(x_vals), max(x_vals), num_points)
         y_new = poly(x_new)
 
-        return list(zip(x_new, y_new))
+        return np.column_stack((x_new, y_new))
 
     def update_waveform_status(self):
         """

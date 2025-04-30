@@ -7,7 +7,7 @@ from PySide6.QtCore import QRunnable, QObject, Signal, QDir
 from pymodbus.client import ModbusTcpClient
 from scipy.interpolate import CubicSpline, Akima1DInterpolator
 
-from common import Interpolation, InterpolationManager
+from common import Interpolation, InterpolationManager, waveform_mapping
 
 
 class TaskRunner(QRunnable):
@@ -173,16 +173,8 @@ class SaveMockwaveformTask(QObject):
 
     def run(self):
         try:
-            motor = self.motor_pool[self.config["当前电机"]]
-            zero_pos, limit_pos = motor["零位"], motor["限位"]
-            freq, scale, offset = self.config["频率"], self.config["幅值比例"], self.config["偏移量"]
-
-            result = np.array(self.points)
-            result[:, 0] /= freq
-            result[:, 1] = (result[:, 1] * (limit_pos - zero_pos) - zero_pos) * scale + offset
-            interpolated_points = np.clip(result, self.y_min, self.y_max)
-
-            df = pd.DataFrame(interpolated_points, columns=['x', 'y'])
+            output_points = np.clip(waveform_mapping(self.config, self.motor_pool, self.points), self.y_min, self.y_max)
+            df = pd.DataFrame(output_points, columns=['x', 'y'])
             df.astype({'x': 'float32', 'y': 'float32'}).to_csv(
                 self.path, index=False, float_format='%.4f'
             )

@@ -50,8 +50,8 @@ class MainWindow(QMainWindow):
         self._mathjax_server_process = Process(target=run_server, daemon=True)
         self._mathjax_server_process.start()
 
-        self.lock = Lock()
         self.client: Optional[ModbusTcpClient] = None
+        self.lock = Lock()
         self._status_monitor_thread: Optional[Thread] = None
         self._status_monitor_flag = Event()
 
