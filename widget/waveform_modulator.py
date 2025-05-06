@@ -6,7 +6,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import Qt, QPainter, QPen, QColor, QPainterPath, QBrush, QPixmap, QFont, QMouseEvent
 from PySide6.QtWidgets import QWidget
 
-from common import Interpolation, InterpolationManager
+from common import Interpolation, InterpolationManager, compute_features
 
 
 class WaveformStatus(enum.Enum):
@@ -129,7 +129,7 @@ class WaveformModulator(QWidget):
         sorted_points = sorted(points, key=lambda p: p[0])
         x_vals, y_vals = zip(*sorted_points)
         poly = InterpolationManager.get_class(method)(x_vals, y_vals)
-        x_new = np.linspace(min(x_vals), max(x_vals), num_points)
+        x_new = np.linspace(0.0, 1.0, num_points)
         y_new = poly(x_new)
 
         return np.column_stack((x_new, y_new))

@@ -68,6 +68,9 @@ class ConnectionStatusManager(QWidget):
                 self.status_light.setFlashing(False)
             self.update()
 
+    def get_color(self):
+        return self.status_light.current_color
+
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.current_status != ConnectionStatus.Connecting:

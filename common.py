@@ -4,6 +4,7 @@ from typing import Tuple
 import numpy as np
 from PySide6.QtCore import QThreadPool
 from scipy.interpolate import Akima1DInterpolator, CubicSpline
+from sympy.physics.units import length
 
 
 class Interpolation(Enum):
@@ -91,44 +92,36 @@ def waveform_mapping(config: dict, motor_pool: dict, points: np.ndarray) -> np.n
     return np.clip(mapping_points, zero_pos, limit_pos)
 
 
-def compute_features(points: np.ndarray) -> Tuple[float, float, float]:
+def compute_features(points: np.ndarray) -> Tuple[float, float, float, float]:
     """
     运动学特征计算
     :param points : 曲线点集，shape=(N,2)
-    :return: (velocity, acceleration, jerk)
+    :return: (max_velocity, max_acceleration, max_deceleration, jerk)
     """
     if points.ndim != 2:
         raise ValueError("输入必须是N×2的二维数组")
 
-    # 按x列排序并解构
     sorted_idx = np.argsort(points[:, 0])
-    x = points[sorted_idx, 0]
-    y = points[sorted_idx, 1]
+    t = points[sorted_idx, 0]  # 时间轴
+    y = points[sorted_idx, 1]  # 位置量
 
-    # 速度
-    delta_y = np.abs(np.diff(y))
-    max_abs_delta = delta_y.max() if delta_y.size > 0 else 0.0
+    # 计算实际时间差
+    dt = np.diff(t)
+    dt = np.where(dt == 0, 1e-6, dt)  # 避免除零错误
 
-    # 加速度
-    non_zero_mask = y != 0
-    if np.any(non_zero_mask):
-        reciprocals = 1.0 / y[non_zero_mask]
-        max_abs_reciprocal = np.abs(reciprocals).max()
-    else:
-        max_abs_reciprocal = 0.0
+    # 一阶导数：速度
+    velocity = np.diff(y) / dt
+    max_velocity = np.max(np.abs(velocity)) if velocity.size > 0 else 0.0
 
-    # 加加速度
-    d2y = np.zeros_like(y)
-    dx = np.diff(x)
-    if np.allclose(dx, dx[0], atol=1e-6):  # 均匀网格
-        h = dx[0]
-        d2y[1:-1] = (y[2:] - 2 * y[1:-1] + y[:-2]) / h ** 2
-    else:  # 非均匀网格
-        h_prev = x[1:-1] - x[:-2]
-        h_next = x[2:] - x[1:-1]
-        dy_prev = (y[1:-1] - y[:-2]) / h_prev
-        dy_next = (y[2:] - y[1:-1]) / h_next
-        d2y[1:-1] = 2 * (dy_next - dy_prev) / (h_prev + h_next)
-    max_abs_d2y = np.abs(d2y).max()
+    # 二阶导数：加速度
+    acceleration = np.diff(velocity) / dt[:-1]
+    positive_accel = acceleration[acceleration > 0]  # 加速段
+    negative_accel = acceleration[acceleration < 0]  # 减速段
+    max_acceleration = positive_accel.max() if positive_accel.size > 0 else 0.0
+    max_deceleration = negative_accel.min() if negative_accel.size > 0 else 0.0
 
-    return max_abs_delta, max_abs_reciprocal, max_abs_d2y
+    # 三阶导数：加加速度（jerk）
+    jerk = np.diff(acceleration) / dt[:-2]
+    max_jerk = np.max(np.abs(jerk)) if jerk.size > 0 else 0.0
+
+    return max_velocity, max_acceleration, max_deceleration, max_jerk

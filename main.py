@@ -15,7 +15,7 @@ from loguru import logger
 from pymodbus.client import ModbusTcpClient
 
 from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
-                    ConnectionStatus)
+                    ConnectionStatus, compute_features, waveform_mapping)
 from communication import (float_to_fixed, split_array, process_write_response, process_status_code, fixed_to_float)
 from mathjax_server import run_server
 from task import ConnectionTask, TaskRunner, SaveMockwaveformTask, SaveWaveformConfigTask, ReadWaveformConfigTask
@@ -459,7 +459,7 @@ class MainWindow(QMainWindow):
         """
         sender = self.sender()
         if sender.text() == MotorPowerStatus.PowerOn:
-            if self.motor_status_manager.status_light != StatusLight.Color.Red:
+            if self.connection_status.get_color() != StatusLight.Color.Green:
                 QMessageBox.critical(self, "错误", "当前未连接PLC，请连接后再操作！")
                 return
 
@@ -493,7 +493,7 @@ class MainWindow(QMainWindow):
         """
         电机复位
         """
-        if self.motor_status_manager.status_light != StatusLight.Color.Red:
+        if self.connection_status.get_color() != StatusLight.Color.Green:
             QMessageBox.critical(self, "错误", "当前未连接PLC，请连接后再操作！")
             return
 
