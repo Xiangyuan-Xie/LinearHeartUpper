@@ -1,12 +1,12 @@
 import enum
-from typing import Sequence, Tuple
+from typing import Sequence, Optional
 
 import numpy as np
 from PySide6.QtCore import Signal
 from PySide6.QtGui import Qt, QPainter, QPen, QColor, QPainterPath, QBrush, QPixmap, QFont, QMouseEvent
 from PySide6.QtWidgets import QWidget
 
-from common import Interpolation, InterpolationManager, compute_features
+from common import Interpolation, InterpolationManager
 
 
 class WaveformStatus(enum.Enum):
@@ -26,7 +26,7 @@ class WaveformModulator(QWidget):
         self.x_range = 1.0  # X轴范围
         self.y_range = 1.0  # Y轴范围
         self.static_pixmap = None  # 缓存静态内容
-        self.dragging_point = None  # 当前拖动点的索引
+        self.dragging_point: Optional[int] = None  # 当前拖动点的索引
         self.setMouseTracking(True)  # 启用鼠标跟踪，捕捉鼠标移动事件
 
     def add_point(self, x: float, y: float):

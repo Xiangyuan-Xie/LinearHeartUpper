@@ -15,7 +15,7 @@ from loguru import logger
 from pymodbus.client import ModbusTcpClient
 
 from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
-                    ConnectionStatus, compute_features, waveform_mapping)
+                    ConnectionStatus)
 from communication import (float_to_fixed, split_array, process_write_response, process_status_code, fixed_to_float)
 from mathjax_server import run_server
 from task import ConnectionTask, TaskRunner, SaveMockwaveformTask, SaveWaveformConfigTask, ReadWaveformConfigTask
@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
         self.waveform_modulator = WaveformModulator(self.config)
         self.waveform_modulator.points_changed.connect(lambda: (
             self.latex_board.create_polynomial_task(self.config["插值点集"]),
-            self.update_status(f"正在使用{InterpolationManager.get_name(self.config["插值方法"])}插值法进行计算！"),
+            self.update_status(f"正在使用{InterpolationManager.get_name(self.config['插值方法'])}插值法进行计算！"),
         ))
         self.waveform_modulator.waveform_status.connect(lambda status: (
             self.config.__setitem__("波形状态", status),
@@ -815,7 +815,7 @@ class MainWindow(QMainWindow):
             task.status_message.connect(self.update_status)
             self.thread_pool.start(TaskRunner(task))
 
-    def adjust_y_scale(self, zero_position: float=None, limit_position: float=None):
+    def adjust_y_scale(self, zero_position: Optional[float]=None, limit_position: Optional[float]=None):
         """
         波形视图坐标轴自适应
         :param zero_position: 导轨零位

@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Sequence, Union
+from typing import Sequence, Union, List
 
 import numpy as np
 from PySide6.QtCharts import QChartView, QLineSeries, QChart, QValueAxis
@@ -18,10 +18,10 @@ class FeedbackWaveformChart(QChartView):
 
     def __init__(self, y_range: Sequence[float], display_window=100):
         super().__init__()
-        self.data_pool = deque(maxlen=self.MAX_STORAGE)
+        self.data_pool: deque[float] = deque(maxlen=self.MAX_STORAGE)
 
         self.record_status = False
-        self.record_data = []
+        self.record_data: List[float] = []
 
         self._display_range = min(max(display_window, self.MIN_DISPLAY), self.MAX_DISPLAY)
 
@@ -43,7 +43,7 @@ class FeedbackWaveformChart(QChartView):
         self.chart.addAxis(self.y_axis, Qt.AlignmentFlag.AlignLeft)
         self.waveform_series.attachAxis(self.y_axis)
 
-    def add_points(self, points: Union[float, Sequence[float]]) -> None:
+    def add_points(self, points: Sequence[float]) -> None:
         """
         向数据池中增加新数据点并触发更新
         :param points: 新数据点
@@ -53,7 +53,7 @@ class FeedbackWaveformChart(QChartView):
 
         self.data_pool.extend(points)
         if self.record_status:
-            self.record_data.append(points)
+            self.record_data.extend(points)
         self._refresh_visualization()
 
     def adjust_display_scope(self, new_scope: int):

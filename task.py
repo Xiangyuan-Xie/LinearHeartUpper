@@ -1,5 +1,5 @@
 import pickle
-from typing import Sequence, Any
+from typing import Sequence, Any, List
 
 import numpy as np
 import pandas as pd
@@ -141,7 +141,7 @@ class ConnectionTask(QObject):
 class SaveRecordTask(QObject):
     status_message = Signal(str)
 
-    def __init__(self, record_data: Sequence[float]):
+    def __init__(self, record_data: List[float]):
         super().__init__()
         self.record_data = record_data.copy()
 
@@ -162,7 +162,7 @@ class SaveMockwaveformTask(QObject):
     status_message = Signal(str)
 
     def __init__(self, path: str, motor_pool: dict, config: dict, y_max: float, y_min: float,
-                 points: Sequence[Sequence[float]]):
+                 points: np.ndarray):
         super().__init__()
         self.path = path
         self.motor_pool = motor_pool.copy()
