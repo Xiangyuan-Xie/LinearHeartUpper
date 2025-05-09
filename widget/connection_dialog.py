@@ -1,7 +1,14 @@
 import re
 
-from PySide6.QtCore import Signal, Slot, QThreadPool
-from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QLineEdit, QPushButton, QMessageBox
+from PySide6.QtCore import QThreadPool, Signal, Slot
+from PySide6.QtWidgets import (
+    QDialog,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+)
 
 from common import ConnectionStatus
 
@@ -39,13 +46,13 @@ class ConnectionDialog(QDialog):
         连接PLC功能实现
         """
         # IPv4规则检查
-        host_pattern = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        host_pattern = r"^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
         if not bool(re.match(host_pattern, self.host.text())):
             QMessageBox.warning(self, "警告", "请检查当前设置IP地址是否有效！")
             return
 
         # 端口规则检查
-        port_pattern = r'^([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$'
+        port_pattern = r"^([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
         if not bool(re.match(port_pattern, self.port.text())):
             QMessageBox.warning(self, "警告", "请检查当前设置端口是否有效！")
             return

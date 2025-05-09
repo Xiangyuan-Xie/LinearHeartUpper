@@ -1,11 +1,11 @@
 import pickle
-from typing import Sequence, Any, List
+from typing import Any, List, Sequence
 
 import numpy as np
 import pandas as pd
-from PySide6.QtCore import QRunnable, QObject, Signal, QDir
 from pymodbus.client import ModbusTcpClient
-from scipy.interpolate import CubicSpline, Akima1DInterpolator
+from PySide6.QtCore import QDir, QObject, QRunnable, Signal
+from scipy.interpolate import Akima1DInterpolator, CubicSpline
 
 from common import Interpolation, InterpolationManager, waveform_mapping
 
@@ -49,11 +49,7 @@ class ExpressionTask(QObject):
                 if abs(coef) > 1e-6:  # 过滤微小系数
                     power = 3 - expo
                     exponent = f"^{power}" if power != 1 else ""
-                    base = (
-                        f"{coef}(t - {xi}){exponent}"
-                        if xi != 0
-                        else f"{coef}t{exponent}"
-                    )
+                    base = f"{coef}(t - {xi}){exponent}" if xi != 0 else f"{coef}t{exponent}"
                     term = base.replace("-", " - ").replace("+ -", "- ")
                     terms.append(term)
 
@@ -148,11 +144,7 @@ class SaveRecordTask(QObject):
     def run(self):
         try:
             df = pd.DataFrame(self.record_data, columns=["Position"])
-            df.to_csv(
-                "output.csv",
-                index=False,
-                float_format='%.4f'
-            )
+            df.to_csv("output.csv", index=False, float_format="%.4f")
             self.status_message.emit(f"保存录制数据成功！")
         except Exception as e:
             self.status_message.emit(f"保存录制数据时发生错误：{e}")
@@ -161,8 +153,7 @@ class SaveRecordTask(QObject):
 class SaveMockwaveformTask(QObject):
     status_message = Signal(str)
 
-    def __init__(self, path: str, motor_pool: dict, config: dict, y_max: float, y_min: float,
-                 points: np.ndarray):
+    def __init__(self, path: str, motor_pool: dict, config: dict, y_max: float, y_min: float, points: np.ndarray):
         super().__init__()
         self.path = path
         self.motor_pool = motor_pool.copy()
@@ -174,10 +165,8 @@ class SaveMockwaveformTask(QObject):
     def run(self):
         try:
             output_points = np.clip(waveform_mapping(self.config, self.motor_pool, self.points), self.y_min, self.y_max)
-            df = pd.DataFrame(output_points, columns=['x', 'y'])
-            df.astype({'x': 'float32', 'y': 'float32'}).to_csv(
-                self.path, index=False, float_format='%.4f'
-            )
+            df = pd.DataFrame(output_points, columns=["x", "y"])
+            df.astype({"x": "float32", "y": "float32"}).to_csv(self.path, index=False, float_format="%.4f")
             self.status_message.emit(f"保存虚拟波形到 {QDir.toNativeSeparators(self.path)}！")
         except Exception as e:
             self.status_message.emit(f"保存虚拟波形时发生错误：{e}")

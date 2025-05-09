@@ -1,7 +1,7 @@
 from enum import Enum
 
-from PySide6.QtCore import Qt, QTimer, QRectF, QSize
-from PySide6.QtGui import QColor, QPainter, QBrush
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QPainter
 from PySide6.QtWidgets import QWidget
 
 
@@ -12,7 +12,7 @@ class StatusLight(QWidget):
         Orange = QColor(255, 165, 0)
         Red = QColor(255, 0, 0)
 
-    def __init__(self, diameter: int=25, color: Color=Color.Grey, flashing: bool=False):
+    def __init__(self, diameter: int = 25, color: Color = Color.Grey, flashing: bool = False):
         super().__init__()
         self.diameter = diameter  # 直径
         self.current_color = color  # 颜色

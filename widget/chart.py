@@ -1,9 +1,9 @@
 from collections import deque
-from typing import Sequence, Union, List
+from typing import List, Sequence
 
 import numpy as np
-from PySide6.QtCharts import QChartView, QLineSeries, QChart, QValueAxis
-from PySide6.QtCore import Qt, QPointF, QMargins, Slot, QThreadPool, Signal
+from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
+from PySide6.QtCore import QMargins, QPointF, Qt, QThreadPool, Signal, Slot
 
 from common import waveform_mapping
 from task import SaveRecordTask, TaskRunner
@@ -13,7 +13,7 @@ class FeedbackWaveformChart(QChartView):
     status_message = Signal()
     thread_pool = QThreadPool.globalInstance()
     MAX_STORAGE = 1000  # 数据存储上限
-    MIN_DISPLAY = 10    # 最小显示点数
+    MIN_DISPLAY = 10  # 最小显示点数
     MAX_DISPLAY = 1000  # 最大显示点数
 
     def __init__(self, y_range: Sequence[float], display_window=100):
@@ -147,7 +147,8 @@ class MockWaveformChart(QChartView):
 
     def update_data(self, new_samples: np.ndarray):
         mapping_points = np.clip(
-            waveform_mapping(self.config, self.motor_pool, new_samples), self.axis_y.min(), self.axis_y.max())
+            waveform_mapping(self.config, self.motor_pool, new_samples), self.axis_y.min(), self.axis_y.max()
+        )
         self.waveform_series.replace([QPointF(x, y) for x, y in mapping_points])
         self.chart.update()
 

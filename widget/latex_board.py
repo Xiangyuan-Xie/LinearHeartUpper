@@ -1,6 +1,6 @@
-from typing import Sequence, Tuple, Any, Dict
+from typing import Any, Dict, Sequence, Tuple
 
-from PySide6.QtCore import Slot, Signal, QThreadPool
+from PySide6.QtCore import QThreadPool, Signal, Slot
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -52,7 +52,8 @@ class LatexBoard(QWidget):
 
     @staticmethod
     def generate_html_context(latex_polynomial: str) -> str:
-        return r'''
+        return (
+            r"""
             <!DOCTYPE html>
             <html lang="en">
                 <head>
@@ -65,9 +66,11 @@ class LatexBoard(QWidget):
                 </head>
                 <body>
                     <p>
-        ''' + latex_polynomial + r'''
+        """
+            + latex_polynomial
+            + r"""
                     </p>
                 </body>
             </html>
-        '''
-
+        """
+        )

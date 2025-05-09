@@ -2,14 +2,15 @@ import numpy as np
 from pymodbus.client import ModbusTcpClient
 
 from common import RegisterAddress
-from communication import float_to_fixed, fixed_to_float
+from communication import float_to_fixed
 
 
 def fixed_bin(num, bits=16):
     return f"0b{num & (2**bits-1):0{bits}b}"
 
+
 # 创建客户端
-client = ModbusTcpClient('192.168.0.100', port=502)
+client = ModbusTcpClient("192.168.0.100", port=502)
 client.connect()
 
 try:

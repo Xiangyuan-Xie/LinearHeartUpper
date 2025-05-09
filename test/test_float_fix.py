@@ -1,6 +1,6 @@
 import numpy as np
 
-from communication import float_to_fixed, fixed_to_float
+from communication import fixed_to_float, float_to_fixed
 
 original = np.array([-27.7879706, 8.08080747, 0.452924949, 0.404347826], dtype=np.float32)
 encoded = float_to_fixed(original)

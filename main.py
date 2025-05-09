@@ -2,28 +2,68 @@ import sys
 import time
 from datetime import datetime
 from multiprocessing import Process
-from threading import Thread, Event, Lock
+from threading import Event, Lock, Thread
 from typing import Optional
 
 import numpy as np
-from PySide6.QtCore import Qt, QThreadPool, Slot, QDir
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (QApplication, QMainWindow, QHBoxLayout, QComboBox, QFrame, QDoubleSpinBox,
-                               QTabWidget, QMenuBar, QMenu, QFileDialog, QSpinBox, QVBoxLayout, QWidget, QLabel,
-                               QGridLayout, QPushButton, QMessageBox, QSlider, QSizePolicy)
 from loguru import logger
 from pymodbus.client import ModbusTcpClient
+from PySide6.QtCore import QDir, Qt, QThreadPool, Slot
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMenuBar,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from common import (Interpolation, InterpolationManager, RegisterAddress, MotorPowerStatus, MotorOperationStatus,
-                    ConnectionStatus)
-from communication import (float_to_fixed, split_array, process_write_response, process_status_code, fixed_to_float)
+from common import (
+    ConnectionStatus,
+    Interpolation,
+    InterpolationManager,
+    MotorOperationStatus,
+    MotorPowerStatus,
+    RegisterAddress,
+)
+from communication import (
+    fixed_to_float,
+    float_to_fixed,
+    process_status_code,
+    process_write_response,
+    split_array,
+)
 from mathjax_server import run_server
-from task import ConnectionTask, TaskRunner, SaveMockwaveformTask, SaveWaveformConfigTask, ReadWaveformConfigTask
+from task import (
+    ConnectionTask,
+    ReadWaveformConfigTask,
+    SaveMockwaveformTask,
+    SaveWaveformConfigTask,
+    TaskRunner,
+)
 from widget.chart import FeedbackWaveformChart, MockWaveformChart
 from widget.connection_dialog import ConnectionDialog
 from widget.latex_board import LatexBoard
 from widget.status_light import StatusLight
-from widget.status_manager import ConnectionStatusManager, RecordStatusManager, MotorStatusManager
+from widget.status_manager import (
+    ConnectionStatusManager,
+    MotorStatusManager,
+    RecordStatusManager,
+)
 from widget.waveform_modulator import WaveformModulator, WaveformStatus
 
 
@@ -37,14 +77,9 @@ class MainWindow(QMainWindow):
             "频率": 1.0,
             "幅值比例": 1.0,
             "波形状态": WaveformStatus.Unset,
-            "当前电机": "1号电机"
+            "当前电机": "1号电机",
         }
-        self.motor_pool = {
-            "1号电机": {
-                "零位": 0.0,
-                "限位": 20.0
-            }
-        }
+        self.motor_pool = {"1号电机": {"零位": 0.0, "限位": 20.0}}
         self.thread_pool = QThreadPool.globalInstance()
 
         self._mathjax_server_process = Process(target=run_server, daemon=True)
@@ -74,7 +109,7 @@ class MainWindow(QMainWindow):
         self.connection_status = ConnectionStatusManager(self)
         self.connection_status.connection_request.connect(self.open_connection_dialog)
         self.status_bar.addPermanentWidget(self.connection_status)
-        self.create_connection_request('192.168.0.100', 502)
+        self.create_connection_request("192.168.0.100", 502)
 
         """
         菜单栏
@@ -105,15 +140,19 @@ class MainWindow(QMainWindow):
 
         # 波形调制区域
         self.waveform_modulator = WaveformModulator(self.config)
-        self.waveform_modulator.points_changed.connect(lambda: (
-            self.latex_board.create_polynomial_task(self.config["插值点集"]),
-            self.update_status(f"正在使用{InterpolationManager.get_name(self.config['插值方法'])}插值法进行计算！"),
-        ))
-        self.waveform_modulator.waveform_status.connect(lambda status: (
-            self.config.__setitem__("波形状态", status),
-            self.update_waveform_status(status),
-            self.update_mock_waveform_display(),
-        ))
+        self.waveform_modulator.points_changed.connect(
+            lambda: (
+                self.latex_board.create_polynomial_task(self.config["插值点集"]),
+                self.update_status(f"正在使用{InterpolationManager.get_name(self.config['插值方法'])}插值法进行计算！"),
+            )
+        )
+        self.waveform_modulator.waveform_status.connect(
+            lambda status: (
+                self.config.__setitem__("波形状态", status),
+                self.update_waveform_status(status),
+                self.update_mock_waveform_display(),
+            )
+        )
         left_layout.addWidget(self.waveform_modulator)
 
         # 波形状态区域
@@ -148,9 +187,7 @@ class MainWindow(QMainWindow):
 
         motor_selection_box = QComboBox()
         motor_selection_box.addItems(list(self.motor_pool.keys()))
-        motor_selection_box.currentTextChanged.connect(lambda name: (
-            self.config.__setitem__("当前电机", name)
-        ))
+        motor_selection_box.currentTextChanged.connect(lambda name: (self.config.__setitem__("当前电机", name)))
         motor_setting_layout.addWidget(motor_selection_box, 1, 1)
 
         zero_position_label = QLabel("零位：")
@@ -163,10 +200,12 @@ class MainWindow(QMainWindow):
         zero_position.setSingleStep(0.1)
         zero_position.setValue(self.motor_pool[self.config["当前电机"]]["零位"])
         zero_position.setSuffix(" mm")
-        zero_position.valueChanged.connect(lambda zero: (
-            self.motor_pool[self.config["当前电机"]].__setitem__("零位", zero),
-            self.adjust_y_scale(zero_position=zero)
-        ))
+        zero_position.valueChanged.connect(
+            lambda zero: (
+                self.motor_pool[self.config["当前电机"]].__setitem__("零位", zero),
+                self.adjust_y_scale(zero_position=zero),
+            )
+        )
         motor_setting_layout.addWidget(zero_position, 2, 1)
 
         limit_position_label = QLabel("限位：")
@@ -179,10 +218,12 @@ class MainWindow(QMainWindow):
         limit_position.setSingleStep(0.1)
         limit_position.setValue(self.motor_pool[self.config["当前电机"]]["限位"])
         limit_position.setSuffix(" mm")
-        limit_position.valueChanged.connect(lambda limit: (
-            self.motor_pool[self.config["当前电机"]].__setitem__("限位", limit),
-            self.adjust_y_scale(limit_position=limit)
-        ))
+        limit_position.valueChanged.connect(
+            lambda limit: (
+                self.motor_pool[self.config["当前电机"]].__setitem__("限位", limit),
+                self.adjust_y_scale(limit_position=limit),
+            )
+        )
         motor_setting_layout.addWidget(limit_position, 3, 1)
 
         motor_setting_frame.setLayout(motor_setting_layout)
@@ -205,24 +246,29 @@ class MainWindow(QMainWindow):
 
         self.method_selection = QComboBox()
         self.method_selection.addItems([InterpolationManager.get_name(method) for method in Interpolation])
-        self.method_selection.currentTextChanged.connect(lambda text: (
-            self.config.__setitem__("插值方法", Interpolation[text]),
-            self.waveform_modulator.update(),
-            self.waveform_modulator.calc_polynomial()
-        ))
+        self.method_selection.currentTextChanged.connect(
+            lambda text: (
+                self.config.__setitem__("插值方法", Interpolation[text]),
+                self.waveform_modulator.update(),
+                self.waveform_modulator.calc_polynomial(),
+            )
+        )
         params_layout.addWidget(self.method_selection, 1, 1)
 
         self.set_offset = QDoubleSpinBox()
-        self.set_offset.setRange(self.motor_pool[self.config["当前电机"]]["零位"],
-                                 self.motor_pool[self.config["当前电机"]]["限位"])
+        self.set_offset.setRange(
+            self.motor_pool[self.config["当前电机"]]["零位"], self.motor_pool[self.config["当前电机"]]["限位"]
+        )
         self.set_offset.setDecimals(1)
         self.set_offset.setSingleStep(0.1)
         self.set_offset.setValue(self.config["偏移量"])
         self.set_offset.setSuffix(" mm")
-        self.set_offset.valueChanged.connect(lambda value: (
-            self.config.__setitem__("偏移量", value),
-            self.update_mock_waveform_display(),
-        ))
+        self.set_offset.valueChanged.connect(
+            lambda value: (
+                self.config.__setitem__("偏移量", value),
+                self.update_mock_waveform_display(),
+            )
+        )
         params_layout.addWidget(QLabel("偏移量："), 2, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         params_layout.addWidget(self.set_offset, 2, 1)
 
@@ -231,10 +277,12 @@ class MainWindow(QMainWindow):
         self.set_frequency.setSingleStep(0.1)
         self.set_frequency.setValue(self.config["频率"])
         self.set_frequency.setSuffix(" Hz")
-        self.set_frequency.valueChanged.connect(lambda value: (
-            self.config.__setitem__("频率", value),
-            self.update_mock_waveform_display(),
-        ))
+        self.set_frequency.valueChanged.connect(
+            lambda value: (
+                self.config.__setitem__("频率", value),
+                self.update_mock_waveform_display(),
+            )
+        )
         params_layout.addWidget(QLabel("频率："), 3, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         params_layout.addWidget(self.set_frequency, 3, 1)
 
@@ -243,10 +291,12 @@ class MainWindow(QMainWindow):
         self.set_amplitude.setSingleStep(1)
         self.set_amplitude.setValue(int(self.config["幅值比例"] * 100))
         self.set_amplitude.setSuffix(" %")
-        self.set_amplitude.valueChanged.connect(lambda value: (
-            self.config.__setitem__("幅值比例", float(value) / 100),
-            self.update_mock_waveform_display(),
-        ))
+        self.set_amplitude.valueChanged.connect(
+            lambda value: (
+                self.config.__setitem__("幅值比例", float(value) / 100),
+                self.update_mock_waveform_display(),
+            )
+        )
         params_layout.addWidget(QLabel("幅值比例："), 4, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         params_layout.addWidget(self.set_amplitude, 4, 1)
 
@@ -303,10 +353,12 @@ class MainWindow(QMainWindow):
         simulation_time.setSingleStep(0.1)
         simulation_time.setValue(1.0)
         simulation_time.setSuffix(" s")
-        simulation_time.valueChanged.connect(lambda value: (
-            self.mock_chart.axis_x.setMax(value),
-            self.update_mock_waveform_display(),
-        ))
+        simulation_time.valueChanged.connect(
+            lambda value: (
+                self.mock_chart.axis_x.setMax(value),
+                self.update_mock_waveform_display(),
+            )
+        )
         motor_init_layout.addWidget(simulation_time, 3, 1)
 
         motor_init_frame.setLayout(motor_init_layout)
@@ -360,7 +412,8 @@ class MainWindow(QMainWindow):
 
         self.record_status_manager = RecordStatusManager(self, self.connection_status)
         self.record_status_manager.status_changed.connect(
-            lambda status: self.feedback_chart.toggle_record_status(status))
+            lambda status: self.feedback_chart.toggle_record_status(status)
+        )
         feedback_sub_layout.addWidget(self.record_status_manager)
 
         scale_slider = QSlider(Qt.Orientation.Horizontal)
@@ -372,8 +425,9 @@ class MainWindow(QMainWindow):
 
         feedback_layout.addLayout(feedback_sub_layout)
 
-        self.feedback_chart = FeedbackWaveformChart((self.motor_pool[self.config["当前电机"]]["零位"],
-                                                     self.motor_pool[self.config["当前电机"]]["限位"]))
+        self.feedback_chart = FeedbackWaveformChart(
+            (self.motor_pool[self.config["当前电机"]]["零位"], self.motor_pool[self.config["当前电机"]]["限位"])
+        )
         self.feedback_chart.status_message.connect(self.update_status)
         feedback_layout.addWidget(self.feedback_chart)
 
@@ -381,8 +435,10 @@ class MainWindow(QMainWindow):
 
         # 模拟波形页
         self.mock_chart = MockWaveformChart(
-            self.config, self.motor_pool,
-            (self.motor_pool[self.config["当前电机"]]["零位"], self.motor_pool[self.config["当前电机"]]["限位"]))
+            self.config,
+            self.motor_pool,
+            (self.motor_pool[self.config["当前电机"]]["零位"], self.motor_pool[self.config["当前电机"]]["限位"]),
+        )
         multi_widget_area.addTab(self.mock_chart, "模拟波形")
 
         # 多项式页
@@ -416,38 +472,38 @@ class MainWindow(QMainWindow):
         if status == WaveformStatus.Unset:
             self.waveform_status_board.setText("当前未设置波形！")
             self.waveform_status_board.setStyleSheet(
-                '''
+                """
                 background-color: orange;
                 color: white;
                 font-weight: bold;
                 font-size: 14px;
                 padding-top: 5px;
                 padding-bottom: 5px;
-                '''
+                """
             )
         elif status == WaveformStatus.Normal:
             self.waveform_status_board.setText("波形正常，可以执行！")
             self.waveform_status_board.setStyleSheet(
-                '''
+                """
                 background-color: green;
                 color: white;
                 font-weight: bold;
                 font-size: 14px;
                 padding-top: 5px;
                 padding-bottom: 5px;
-                '''
+                """
             )
         elif status == WaveformStatus.Abnormal:
             self.waveform_status_board.setText("波形异常，无法执行！")
             self.waveform_status_board.setStyleSheet(
-                '''
+                """
                 background-color: red;
                 color: white;
                 font-weight: bold;
                 font-size: 14px;
                 padding-top: 5px;
                 padding-bottom: 5px;
-                '''
+                """
             )
         else:
             raise ValueError("未知的波形状态！")
@@ -467,17 +523,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "错误", "当前电机存在故障，请复位后再开始任务！")
                 return
 
-            if not process_write_response(
-                    self.client.write_coil(RegisterAddress.Coil.PowerOn, True), "保持寄存器"):
+            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOn, True), "保持寄存器"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(
-                self.client.write_coil(RegisterAddress.Coil.PowerOn, False), "保持寄存器")
+            process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOn, False), "保持寄存器")
             sender.setText(MotorPowerStatus.PowerOff)
         elif sender.text() == MotorPowerStatus.PowerOff:
-            if not process_write_response(
-                    self.client.write_coil(RegisterAddress.Coil.PowerOff, True), "保持寄存器"):
+            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.PowerOff, True), "保持寄存器"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
@@ -519,19 +572,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", "当前电机离线，请启动电机后再开始任务！")
             return
 
-        packet = float_to_fixed(np.array([self.set_movement_distance.value()]), byte_order='>')
+        packet = float_to_fixed(np.array([self.set_movement_distance.value()]), byte_order=">")
         if not process_write_response(
-                self.client.write_registers(RegisterAddress.Holding.TargetPos, packet.tolist()), "线圈"):
+            self.client.write_registers(RegisterAddress.Holding.TargetPos, packet.tolist()), "线圈"
+        ):
             QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
             return
 
-        if not process_write_response(
-                self.client.write_coil(RegisterAddress.Coil.isWriteTarget, True), "线圈"):
+        if not process_write_response(self.client.write_coil(RegisterAddress.Coil.isWriteTarget, True), "线圈"):
             QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
             return
         time.sleep(0.05)
-        process_write_response(
-            self.client.write_coil(RegisterAddress.Coil.isWriteTarget, False), "线圈")
+        process_write_response(self.client.write_coil(RegisterAddress.Coil.isWriteTarget, False), "线圈")
 
     @Slot()
     def toggle_motor_operation(self):
@@ -571,48 +623,44 @@ class MainWindow(QMainWindow):
             coefficient_matrix[:, :3] *= combined_scale
             coefficient_matrix[:, 3] = (coefficient_matrix[:, 3] * combined_scale) + combined_offset
 
-            encoded_frequency = float_to_fixed(np.array([freq]), byte_order='>')
+            encoded_frequency = float_to_fixed(np.array([freq]), byte_order=">")
             encoded_coefficients = float_to_fixed(
-                np.append(np.column_stack([model.x[:-1], coefficient_matrix]).flatten(), 1))
+                np.append(np.column_stack([model.x[:-1], coefficient_matrix]).flatten(), 1)
+            )
             packet = np.concatenate((np.array([len(model.x) - 1]), encoded_frequency, encoded_coefficients))
 
             address = RegisterAddress.Holding.NumberOfInterval
             split_packet = split_array(packet)
             for sub_packet in split_packet:
-                if not process_write_response(
-                        self.client.write_registers(address, sub_packet), "保持寄存器"):
+                if not process_write_response(self.client.write_registers(address, sub_packet), "保持寄存器"):
                     QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                     return
                 address += len(sub_packet)
 
             if not process_write_response(
-                    self.client.write_coil(RegisterAddress.Coil.isWriteCoefficients, True), "线圈"):
+                self.client.write_coil(RegisterAddress.Coil.isWriteCoefficients, True), "线圈"
+            ):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(
-                self.client.write_coil(RegisterAddress.Coil.isWriteCoefficients, False), "线圈")
+            process_write_response(self.client.write_coil(RegisterAddress.Coil.isWriteCoefficients, False), "线圈")
 
-            if not process_write_response(
-                    self.client.write_coil(RegisterAddress.Coil.Start, True), "线圈"):
+            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.Start, True), "线圈"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(
-                self.client.write_coil(RegisterAddress.Coil.Start, False), "线圈")
+            process_write_response(self.client.write_coil(RegisterAddress.Coil.Start, False), "线圈")
 
             self.update_status("运行参数设置成功，电机开始运行！")
             sender.setText(MotorOperationStatus.Stop)
 
         # 停止运行
         elif sender.text() == MotorOperationStatus.Stop:
-            if not process_write_response(
-                    self.client.write_coil(RegisterAddress.Coil.Stop, True), "线圈"):
+            if not process_write_response(self.client.write_coil(RegisterAddress.Coil.Stop, True), "线圈"):
                 QMessageBox.warning(self, "警告", "与PLC通讯时发生错误，请检查！")
                 return
             time.sleep(0.05)
-            process_write_response(
-                self.client.write_coil(RegisterAddress.Coil.Stop, False), "线圈")
+            process_write_response(self.client.write_coil(RegisterAddress.Coil.Stop, False), "线圈")
             self.update_status("电机已停止运行！")
             sender.setText(MotorOperationStatus.Start)
 
@@ -629,7 +677,7 @@ class MainWindow(QMainWindow):
             caption="读取波形",
             filter="DAT Files (*.dat);;All Files (*)",
             selectedFilter="DAT Files (*.dat)",
-            options=QFileDialog.Option.ReadOnly
+            options=QFileDialog.Option.ReadOnly,
         )
         if path:
             task = ReadWaveformConfigTask(path)
@@ -663,7 +711,7 @@ class MainWindow(QMainWindow):
             caption="保存波形",
             filter="DAT Files (*.dat);;All Files (*)",
             selectedFilter="DAT Files (*.dat)",
-            options=QFileDialog.Option.ReadOnly
+            options=QFileDialog.Option.ReadOnly,
         )
         if path:
             task = SaveWaveformConfigTask(path, self.config)
@@ -759,13 +807,16 @@ class MainWindow(QMainWindow):
                     if current_address + read_length > buffer_size:
                         first_segment = buffer_size - current_address
                         pos_response1 = self.client.read_input_registers(
-                            RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * first_segment)
+                            RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * first_segment
+                        )
                         pos_response2 = self.client.read_input_registers(
-                            RegisterAddress.Input.Position_Start, count= 2 * (read_length - first_segment))
+                            RegisterAddress.Input.Position_Start, count=2 * (read_length - first_segment)
+                        )
                         encoded_position.extend(pos_response1.registers + pos_response2.registers)
                     else:
                         pos_response = self.client.read_input_registers(
-                            RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * read_length)
+                            RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * read_length
+                        )
                         encoded_position.extend(pos_response.registers)
                     remaining -= read_length
 
@@ -802,20 +853,21 @@ class MainWindow(QMainWindow):
             caption="导出虚拟波形",
             filter="CSV Files (*.csv);;All Files (*)",
             selectedFilter="CSV Files (*.csv)",
-            options=QFileDialog.Option.ReadOnly
+            options=QFileDialog.Option.ReadOnly,
         )
         if path:
             task = SaveMockwaveformTask(
                 QDir.toNativeSeparators(path),
-                self.motor_pool, self.config,
+                self.motor_pool,
+                self.config,
                 self.mock_chart.axis_y.max(),
                 self.mock_chart.axis_y.min(),
-                self.waveform_modulator.interpolated_points
+                self.waveform_modulator.interpolated_points,
             )
             task.status_message.connect(self.update_status)
             self.thread_pool.start(TaskRunner(task))
 
-    def adjust_y_scale(self, zero_position: Optional[float]=None, limit_position: Optional[float]=None):
+    def adjust_y_scale(self, zero_position: Optional[float] = None, limit_position: Optional[float] = None):
         """
         波形视图坐标轴自适应
         :param zero_position: 导轨零位

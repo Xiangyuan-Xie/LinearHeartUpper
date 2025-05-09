@@ -1,9 +1,19 @@
 import enum
-from typing import Sequence, Optional
+from typing import Optional, Sequence
 
 import numpy as np
 from PySide6.QtCore import Signal
-from PySide6.QtGui import Qt, QPainter, QPen, QColor, QPainterPath, QBrush, QPixmap, QFont, QMouseEvent
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    Qt,
+)
 from PySide6.QtWidgets import QWidget
 
 from common import Interpolation, InterpolationManager
@@ -92,7 +102,9 @@ class WaveformModulator(QWidget):
 
         # 绘制插值曲线
         if len(self.config["插值点集"]) > 2:
-            self.interpolated_points = self.interpolate(self.config["插值方法"], self.config["插值点集"])  # 计算插值曲线点集
+            self.interpolated_points = self.interpolate(
+                self.config["插值方法"], self.config["插值点集"]
+            )  # 计算插值曲线点集
             if self.interpolated_points.size > 0:
                 painter.setPen(QPen(QColor(0, 0, 255), 2))  # 蓝色
 
@@ -116,7 +128,7 @@ class WaveformModulator(QWidget):
         painter.end()
 
     @staticmethod
-    def interpolate(method: Interpolation, points: Sequence[Sequence[float]], num_points: int=1001) -> np.ndarray:
+    def interpolate(method: Interpolation, points: Sequence[Sequence[float]], num_points: int = 1001) -> np.ndarray:
         """
         插值计算功能实现
         :param method: 插值方法
@@ -192,13 +204,13 @@ class WaveformModulator(QWidget):
             static_painter.drawText(15, y + 5, f"{tick_value:.2f}")
 
         # 设置坐标轴标题的字体和颜色
-        title_font = QFont('Times New Roman', 12, QFont.Weight.Bold)  # 加粗
+        title_font = QFont("Times New Roman", 12, QFont.Weight.Bold)  # 加粗
         static_painter.setFont(title_font)
         title_color = QColor(0, 0, 0)  # 黑色
         static_painter.setPen(QPen(title_color))
 
         # 绘制坐标轴标题
-        static_painter.drawText(25, self.height() - 30, 'O')  # 原点
+        static_painter.drawText(25, self.height() - 30, "O")  # 原点
         static_painter.drawText(self.width() - 65, self.height() - 10, "Period")  # X轴标题
         static_painter.drawText(10, 30, "Amplitude")  # Y轴标题
 

@@ -1,19 +1,22 @@
 import bisect
 import time
-from threading import Thread, Event
+from threading import Event, Thread
 
 import numpy as np
-from pymodbus.datastore import ModbusSequentialDataBlock
-from pymodbus.datastore import ModbusSlaveContext, ModbusServerContext
+from logger import logger
+from pymodbus.datastore import (
+    ModbusSequentialDataBlock,
+    ModbusServerContext,
+    ModbusSlaveContext,
+)
 from pymodbus.server import StartTcpServer
 
 from common import RegisterAddress
 from communication import fixed_to_float, float_to_fixed
-from logger import logger
 
 
 class ModbusVirtualSlave:
-    def __init__(self, slave_id=1, port=502, address='0.0.0.0'):
+    def __init__(self, slave_id=1, port=502, address="0.0.0.0"):
         """
         :param slave_id: 从站设备ID (默认1)
         :param port: 监听端口 (默认502)
@@ -28,16 +31,13 @@ class ModbusVirtualSlave:
 
         # 数据存储
         self.data_store = {
-            'hr': ModbusSequentialDataBlock(0x6000, [0] * 16384),  # 保持寄存器
-            'ir': ModbusSequentialDataBlock(0x2000, [0] * 16384),  # 输入寄存器
-            'co': None,  # 线圈
-            'di': None  # 离散输入
+            "hr": ModbusSequentialDataBlock(0x6000, [0] * 16384),  # 保持寄存器
+            "ir": ModbusSequentialDataBlock(0x2000, [0] * 16384),  # 输入寄存器
+            "co": None,  # 线圈
+            "di": None,  # 离散输入
         }
         self.slave_context = ModbusSlaveContext(
-            hr=self.data_store['hr'],
-            ir=self.data_store['ir'],
-            co=self.data_store['co'],
-            di=self.data_store['di']
+            hr=self.data_store["hr"], ir=self.data_store["ir"], co=self.data_store["co"], di=self.data_store["di"]
         )
         self.context = ModbusServerContext(slaves={slave_id: self.slave_context}, single=False)
 
@@ -51,10 +51,7 @@ class ModbusVirtualSlave:
             self._update_thread = Thread(target=self._update_task, daemon=True)
             self._update_thread.start()
 
-            StartTcpServer(
-                context=self.context,
-                address=(self.address, self.port)
-            )
+            StartTcpServer(context=self.context, address=(self.address, self.port))
         except Exception as e:
             logger.error(f"Modbus virtual slave fail: {e}！")
 
@@ -75,11 +72,14 @@ class ModbusVirtualSlave:
                 if status == 2:
                     coefficients.clear()
 
-                    frequency = fixed_to_float(np.array(self.get_holding_registers(RegisterAddress.Frequency, 2))).item()
+                    frequency = fixed_to_float(
+                        np.array(self.get_holding_registers(RegisterAddress.Frequency, 2))
+                    ).item()
                     number_of_interval = self.get_holding_registers(RegisterAddress.NumberOfInterval, 1)[0]
                     for i in range(number_of_interval):
                         decoded_coefficient = fixed_to_float(
-                            np.array(self.get_holding_registers(RegisterAddress.Coefficients + 10 * i, 12)))
+                            np.array(self.get_holding_registers(RegisterAddress.Coefficients + 10 * i, 12))
+                        )
                         coefficients.append(decoded_coefficient.tolist())
 
                     self.set_holding_registers(RegisterAddress.Status, [1])
@@ -152,7 +152,7 @@ def interpolation(x, coefficients):
     x0, a, b, c, d, x1 = coefficients[i]
     dx = x - x0
 
-    return a * dx ** 3 + b * dx ** 2 + c * dx + d
+    return a * dx**3 + b * dx**2 + c * dx + d
 
 
 if __name__ == "__main__":

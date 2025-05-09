@@ -2,9 +2,7 @@ from enum import Enum, IntEnum, StrEnum
 from typing import Tuple
 
 import numpy as np
-from PySide6.QtCore import QThreadPool
 from scipy.interpolate import Akima1DInterpolator, CubicSpline
-from sympy.physics.units import length
 
 
 class Interpolation(Enum):

@@ -1,8 +1,15 @@
 from enum import StrEnum
 
-from PySide6.QtCore import Signal, Qt, Slot
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QGridLayout
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QWidget,
+)
 
 from common import ConnectionStatus
 from widget.status_light import StatusLight
@@ -115,9 +122,15 @@ class RecordStatusManager(QWidget):
         """
         if self.record_button.text() == self.RecordStatus.Start:
             if self.connection_status_manager.current_status != ConnectionStatus.Connected:
-                if (QMessageBox.warning(self.parent, "警告", "当前没有连接PLC，确定要继续开始录制吗？",
-                                        QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-                        == QMessageBox.StandardButton.Cancel):
+                if (
+                    QMessageBox.warning(
+                        self.parent,
+                        "警告",
+                        "当前没有连接PLC，确定要继续开始录制吗？",
+                        QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                    )
+                    == QMessageBox.StandardButton.Cancel
+                ):
                     return
             self.status_changed.emit(True)
             self.record_button.setText(self.RecordStatus.Stop)
