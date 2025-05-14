@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths-ignore:
       - '**.md'
-      - 'doc/**'
+      - '../../docs/**'
       - 'radon-report.txt'
   pull_request:
     branches: [main]
@@ -15,9 +15,10 @@ permissions:
   security-events: write
 
 jobs:
-  code-validation:
+  code-formatting:
+    name: Code Formatting
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
     - uses: actions/checkout@v4
@@ -30,20 +31,10 @@ jobs:
         python-version: "3.12"
         cache: 'pip'
 
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/pip
-          ~/.local/lib/python3.12/site-packages
-        key: ${{ runner.os  }}-python-${{ hashFiles('**/requirements.txt')  }}-v3
-
-    - name: Install toolchain
+    - name: Install formatters
       run: |
-        python -m pip install --upgrade pip
-        pip install autoflake black isort mypy radon
-      env:
-        PATH: ${{ env.PATH }}:/opt/hostedtoolcache/Python/3.12.5/x64/bin
+        python -m pip install --upgrade pip 
+        pip install autoflake black isort
 
     - name: Auto-format code
       run: |
@@ -51,19 +42,81 @@ jobs:
         isort --profile black --atomic .
         black --line-length 120 --target-version py312 --safe .
 
-    - name: Static type checking
-      run: mypy --ignore-missing-imports --explicit-package-bases .
-
-    - name: Complexity analysis
-      run: |
-        radon cc --min C -n D --total-average . > radon-report.txt  
-        radon raw --summary . >> radon-report.txt
-
-    - name: Commit formatting
+    - name: Commit changes
       if: github.event_name  == 'push'
       run: |
         git config --global user.name  "Xiangyuan Xie"
         git config --global user.email  "dragonboat_xxy@163.com" 
         git add .
         git diff --quiet HEAD || git commit -m "CI: Auto-format code"
-        git push
+        git push 
+
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    needs: code-formatting
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install analysis tools
+      run: |
+        pip install mypy types-requests 
+
+    - name: Type checking
+      run: mypy --ignore-missing-imports --explicit-package-bases .
+
+  testing:
+    name: Unit Testing
+    runs-on: ubuntu-latest
+    needs: code-formatting
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt  
+        pip install pytest pytest-cov 
+
+    - name: Run tests
+      run: |
+        pytest --cov=./ --cov-report=xml:coverage.xml  tests/
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: coverage.xml
+
+  complexity-analysis:
+    name: Code Complexity
+    runs-on: ubuntu-latest
+    needs: code-formatting
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+
+    - name: Install Radon
+      run: pip install radon
+
+    - name: Analyze complexity
+      run: |
+        radon cc --min C -n D --total-average . > radon-report.txt  
+        radon raw --summary . >> radon-report.txt

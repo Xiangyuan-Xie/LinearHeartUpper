@@ -1,8 +1,11 @@
 from enum import Enum, IntEnum, StrEnum
-from typing import Tuple
+from typing import Tuple, Union
 
 import numpy as np
+from loguru import logger
 from scipy.interpolate import Akima1DInterpolator, CubicSpline
+
+from communication import float_to_fixed
 
 
 class Interpolation(Enum):
@@ -88,6 +91,47 @@ def waveform_mapping(config: dict, motor_pool: dict, points: np.ndarray) -> np.n
     mapping_points[:, 0] /= frequency
     mapping_points[:, 1] = (mapping_points[:, 1] * (limit_pos - zero_pos) - zero_pos) * scale + offset
     return np.clip(mapping_points, zero_pos, limit_pos)
+
+
+def coefficient_mapping(
+        config: dict, motor_pool: dict, model: Union[Akima1DInterpolator, CubicSpline], encode: bool=True
+    ) -> np.ndarray:
+    """
+    将相对波形系数映射到绝对波形系数
+    :param config:配置文件
+    :param motor_pool: 电机池
+    :param model: 插值模型
+    :param encode: 是否编码后输出，默认为True
+    :return:
+    """
+    motor = motor_pool[config["当前电机"]]
+
+    coefficient_matrix = model.c.T.copy()
+    coefficient_matrix *= (motor["限位"] - motor["零位"])  # 映射到导轨长度
+    coefficient_matrix *= config["幅值比例"]  # 设定幅值
+    coefficient_matrix[:, 3] += motor["零位"]  # 零位偏移
+    coefficient_matrix[:, 3] += config["偏移量"]  # 设定偏移
+
+    coefficients = np.append(np.column_stack([model.x[:-1], coefficient_matrix]).flatten(), 1)
+    logger.debug(f"波形计算完毕，系数矩阵：\n{coefficients}")
+
+    # for j in range(len(model.x) - 1):
+    #     i = j * 5  # 每段系数占5个元素，i按步长5跳跃
+    #     x0 = coefficients[i]
+    #     x1 = coefficients[i + 5]  # 注意潜在越界风险（见下方说明）
+    #
+    #     if x0 <= relative_time_stamp <= x1:
+    #         a = coefficients[i + 1]
+    #         b = coefficients[i + 2]
+    #         c = coefficients[i + 3]
+    #         d = coefficients[i + 4]
+    #         h = relative_time_stamp - x0
+    #         lr_cyclic_position = a * h ** 3 + b * h ** 2 + c * h + d
+    #         break
+    if encode:
+        return float_to_fixed(coefficients)
+    else:
+        return coefficients
 
 
 def compute_features(points: np.ndarray) -> Tuple[float, float, float, float]:

@@ -39,6 +39,7 @@ from common import (
     MotorOperationStatus,
     MotorPowerStatus,
     RegisterAddress,
+    coefficient_mapping,
 )
 from communication import (
     fixed_to_float,
@@ -79,7 +80,7 @@ class MainWindow(QMainWindow):
             "波形状态": WaveformStatus.Unset,
             "当前电机": "1号电机",
         }
-        self.motor_pool = {"1号电机": {"零位": 0.0, "限位": 20.0}}
+        self.motor_pool = {"1号电机": {"零位": 0.0, "限位": 50.0}}
         self.thread_pool = QThreadPool.globalInstance()
 
         self._mathjax_server_process = Process(target=run_server, daemon=True)
@@ -257,7 +258,7 @@ class MainWindow(QMainWindow):
 
         self.set_offset = QDoubleSpinBox()
         self.set_offset.setRange(
-            self.motor_pool[self.config["当前电机"]]["零位"], self.motor_pool[self.config["当前电机"]]["限位"]
+            0, self.motor_pool[self.config["当前电机"]]["限位"] - self.motor_pool[self.config["当前电机"]]["零位"]
         )
         self.set_offset.setDecimals(1)
         self.set_offset.setSingleStep(0.1)
@@ -612,22 +613,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "错误", "当前电机离线，请启动电机后再开始任务！")
                 return
 
-            model = self.latex_board.model
-            motor = self.motor_pool[self.config["当前电机"]]
-            zero_pos, limit_pos = motor["零位"], motor["限位"]
-            freq, scale, offset = self.config["频率"], self.config["幅值比例"], self.config["偏移量"]
-
-            combined_scale = (limit_pos - zero_pos) * scale
-            combined_offset = (-zero_pos * scale) + offset  # 合并偏移
-            coefficient_matrix = model.c.T.copy()
-            coefficient_matrix[:, :3] *= combined_scale
-            coefficient_matrix[:, 3] = (coefficient_matrix[:, 3] * combined_scale) + combined_offset
-
-            encoded_frequency = float_to_fixed(np.array([freq]), byte_order=">")
-            encoded_coefficients = float_to_fixed(
-                np.append(np.column_stack([model.x[:-1], coefficient_matrix]).flatten(), 1)
+            encoded_frequency = float_to_fixed(np.array([self.config["频率"]]), byte_order=">")
+            encoded_coefficients = coefficient_mapping(self.config, self.motor_pool, self.latex_board.model)
+            packet = np.concatenate(
+                (np.array([len(self.latex_board.model.x) - 1]), encoded_frequency, encoded_coefficients)
             )
-            packet = np.concatenate((np.array([len(model.x) - 1]), encoded_frequency, encoded_coefficients))
 
             address = RegisterAddress.Holding.NumberOfInterval
             split_packet = split_array(packet)

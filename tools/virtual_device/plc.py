@@ -3,7 +3,7 @@ import time
 from threading import Event, Thread
 
 import numpy as np
-from logger import logger
+from loguru import logger
 from pymodbus.datastore import (
     ModbusSequentialDataBlock,
     ModbusServerContext,

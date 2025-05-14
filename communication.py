@@ -113,7 +113,7 @@ def process_write_response(response: ModbusPDU, response_type: str = "未知寄�
         )
         return False
     else:
-        logger.info(
+        logger.debug(
             f"写入{response_type}[{response.address}]成功，"
             f"内容：{response.bits if response_type == '线圈' else response.registers}"
         )
@@ -134,7 +134,7 @@ def process_read_response(response: ModbusPDU, response_type: str = "未知寄�
         logger.error(f"读取{response_type}[{response.address}]失败！")
         return False, response
     else:
-        logger.info(
+        logger.debug(
             f"读取{response_type}[{response.address}]成功，"
             f"内容：{response.bits if response_type == '线圈' else response.registers}"
         )

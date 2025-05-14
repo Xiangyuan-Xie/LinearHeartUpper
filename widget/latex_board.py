@@ -32,7 +32,7 @@ class LatexBoard(QWidget):
         新建多项式计算任务功能实现
         :param points: 插值点集
         """
-        task = ExpressionTask(points, self.config["偏移量"], self.config["赋值"], self.config["插值方法"])
+        task = ExpressionTask(points, self.config["偏移量"], self.config["幅值比例"], self.config["插值方法"])
         task.result.connect(self._on_polynomial_result_ready)
         self.thread_pool.start(TaskRunner(task))
 

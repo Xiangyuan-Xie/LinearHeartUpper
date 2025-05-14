@@ -4,6 +4,7 @@ from typing import List, Sequence
 import numpy as np
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import QMargins, QPointF, Qt, QThreadPool, Signal, Slot
+from loguru import logger
 
 from common import waveform_mapping
 from task import SaveRecordTask, TaskRunner
@@ -149,6 +150,7 @@ class MockWaveformChart(QChartView):
         mapping_points = np.clip(
             waveform_mapping(self.config, self.motor_pool, new_samples), self.axis_y.min(), self.axis_y.max()
         )
+        logger.debug(f"虚拟波形拟合完毕，最大值：{max(mapping_points[:, 1])}，最小值：{min(mapping_points[:, 1])}")
         self.waveform_series.replace([QPointF(x, y) for x, y in mapping_points])
         self.chart.update()
 
