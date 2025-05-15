@@ -94,8 +94,8 @@ def waveform_mapping(config: dict, motor_pool: dict, points: np.ndarray) -> np.n
 
 
 def coefficient_mapping(
-        config: dict, motor_pool: dict, model: Union[Akima1DInterpolator, CubicSpline], encode: bool=True
-    ) -> np.ndarray:
+    config: dict, motor_pool: dict, model: Union[Akima1DInterpolator, CubicSpline], encode: bool = True
+) -> np.ndarray:
     """
     将相对波形系数映射到绝对波形系数
     :param config:配置文件
@@ -107,7 +107,7 @@ def coefficient_mapping(
     motor = motor_pool[config["当前电机"]]
 
     coefficient_matrix = model.c.T.copy()
-    coefficient_matrix *= (motor["限位"] - motor["零位"])  # 映射到导轨长度
+    coefficient_matrix *= motor["限位"] - motor["零位"]  # 映射到导轨长度
     coefficient_matrix *= config["幅值比例"]  # 设定幅值
     coefficient_matrix[:, 3] += motor["零位"]  # 零位偏移
     coefficient_matrix[:, 3] += config["偏移量"]  # 设定偏移

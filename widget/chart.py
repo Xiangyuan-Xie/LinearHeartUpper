@@ -2,9 +2,9 @@ from collections import deque
 from typing import List, Sequence
 
 import numpy as np
+from loguru import logger
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import QMargins, QPointF, Qt, QThreadPool, Signal, Slot
-from loguru import logger
 
 from common import waveform_mapping
 from task import SaveRecordTask, TaskRunner
