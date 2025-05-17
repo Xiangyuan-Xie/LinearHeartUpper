@@ -114,20 +114,6 @@ def coefficient_mapping(
 
     coefficients = np.append(np.column_stack([model.x[:-1], coefficient_matrix]).flatten(), 1)
     logger.debug(f"波形计算完毕，系数矩阵：\n{coefficients}")
-
-    # for j in range(len(model.x) - 1):
-    #     i = j * 5  # 每段系数占5个元素，i按步长5跳跃
-    #     x0 = coefficients[i]
-    #     x1 = coefficients[i + 5]  # 注意潜在越界风险（见下方说明）
-    #
-    #     if x0 <= relative_time_stamp <= x1:
-    #         a = coefficients[i + 1]
-    #         b = coefficients[i + 2]
-    #         c = coefficients[i + 3]
-    #         d = coefficients[i + 4]
-    #         h = relative_time_stamp - x0
-    #         lr_cyclic_position = a * h ** 3 + b * h ** 2 + c * h + d
-    #         break
     if encode:
         return float_to_fixed(coefficients)
     else:
