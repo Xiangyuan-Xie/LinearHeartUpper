@@ -11,29 +11,37 @@ permissions:
   security-events: write
 
 jobs:
-  static-analysis:
-    name: Static Analysis
+  pre-commit-checks:
+    name: Pre-Commit Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+    outputs:
+      status: ${{ steps.check.result }}
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.12"
-        cache: 'pip'
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: 'pip'
 
-    - name: Install analysis tools
-      run: |
-        pip install mypy types-requests 
+      - name: Cache pre-commit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
 
-    - name: Type checking
-      run: mypy --ignore-missing-imports --explicit-package-bases .
+      - name: Run security checks
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files --show-diff-on-failure 
 
   testing:
     name: Unit Testing
+    needs: pre-commit-checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -65,6 +73,7 @@ jobs:
 
   complexity-analysis:
     name: Code Complexity
+    needs: pre-commit-checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

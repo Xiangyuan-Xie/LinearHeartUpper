@@ -10,17 +10,20 @@ repos:
           --remove-unused-variables,
           --recursive
         ]
-        exclude: '^(docs/|.*\.md$|radon-report.txt)'
+        exclude: '^(docs/|.*\.md$)'
 
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 6.0.1
     hooks:
       - id: isort
-        args: [--profile, black, --atomic]
+        args: [
+          --profile,
+          black,
+          --atomic]
         additional_dependencies: ["isort[pyproject]"]
 
   - repo: https://github.com/psf/black
-    rev: 24.4.0
+    rev: 25.1.0
     hooks:
       - id: black
         args: [
@@ -28,3 +31,21 @@ repos:
           --target-version=py312,
           --safe
         ]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        name: Type checking
+        entry: mypy
+        args: [
+          "--ignore-missing-imports",
+          "--explicit-package-bases",
+          "--show-error-codes",
+        ]
+        additional_dependencies: [
+          "types-requests"
+        ]
+        language: python
+        language_version: python3.12
+        types: [ python ]
