@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from common import ConnectionStatus
-from widget.status_light import StatusLight
+from linearheart.common.common import ConnectionStatus
+from linearheart.widgets.status_light import StatusLight
 
 
 class MotorStatusManager(QWidget):

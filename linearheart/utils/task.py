@@ -7,7 +7,11 @@ from pymodbus.client import ModbusTcpClient
 from PySide6.QtCore import QDir, QObject, QRunnable, Signal
 from scipy.interpolate import Akima1DInterpolator, CubicSpline
 
-from common import Interpolation, InterpolationManager, waveform_mapping
+from linearheart.common.common import (
+    Interpolation,
+    InterpolationManager,
+    waveform_mapping,
+)
 
 
 class TaskRunner(QRunnable):

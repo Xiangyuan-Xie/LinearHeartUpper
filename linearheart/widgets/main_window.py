@@ -1,4 +1,3 @@
-import sys
 import time
 from datetime import datetime
 from multiprocessing import Process
@@ -11,7 +10,6 @@ from pymodbus.client import ModbusTcpClient
 from PySide6.QtCore import QDir, Qt, QThreadPool, Slot
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QApplication,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -32,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from common import (
+from linearheart.common.common import (
     ConnectionStatus,
     Interpolation,
     InterpolationManager,
@@ -41,31 +39,31 @@ from common import (
     RegisterAddress,
     coefficient_mapping,
 )
-from communication import (
+from linearheart.core.mathjax_server import run_server
+from linearheart.utils.communication import (
     fixed_to_float,
     float_to_fixed,
     process_status_code,
     process_write_response,
     split_array,
 )
-from mathjax_server import run_server
-from task import (
+from linearheart.utils.task import (
     ConnectionTask,
     ReadWaveformConfigTask,
     SaveMockwaveformTask,
     SaveWaveformConfigTask,
     TaskRunner,
 )
-from widget.chart import FeedbackWaveformChart, MockWaveformChart
-from widget.connection_dialog import ConnectionDialog
-from widget.latex_board import LatexBoard
-from widget.status_light import StatusLight
-from widget.status_manager import (
+from linearheart.widgets.chart import FeedbackWaveformChart, MockWaveformChart
+from linearheart.widgets.connection_dialog import ConnectionDialog
+from linearheart.widgets.latex_board import LatexBoard
+from linearheart.widgets.status_light import StatusLight
+from linearheart.widgets.status_manager import (
     ConnectionStatusManager,
     MotorStatusManager,
     RecordStatusManager,
 )
-from widget.waveform_modulator import WaveformModulator, WaveformStatus
+from linearheart.widgets.waveform_modulator import WaveformModulator, WaveformStatus
 
 
 class MainWindow(QMainWindow):
@@ -870,10 +868,3 @@ class MainWindow(QMainWindow):
 
         self.feedback_chart.adjust_y_scale(zero_position, limit_position)
         self.mock_chart.adjust_y_scale(zero_position, limit_position)
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())

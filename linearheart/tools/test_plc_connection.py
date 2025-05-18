@@ -1,8 +1,8 @@
 import numpy as np
 from pymodbus.client import ModbusTcpClient
 
-from common import RegisterAddress
-from communication import float_to_fixed
+from linearheart.common.common import RegisterAddress
+from linearheart.utils.communication import float_to_fixed
 
 
 def fixed_bin(num, bits=16):

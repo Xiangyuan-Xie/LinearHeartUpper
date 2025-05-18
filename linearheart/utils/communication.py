@@ -4,7 +4,7 @@ import numpy as np
 from loguru import logger
 from pymodbus.pdu import ModbusPDU
 
-from widget.status_light import StatusLight
+from linearheart.widgets.status_light import StatusLight
 
 
 def float_to_fixed(arr: np.ndarray, frac_bits: int = 16, byte_order: str = "<") -> np.ndarray:

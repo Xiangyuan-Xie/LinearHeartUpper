@@ -11,8 +11,8 @@ from pymodbus.datastore import (
 )
 from pymodbus.server import StartTcpServer
 
-from common import RegisterAddress
-from communication import fixed_to_float, float_to_fixed
+from linearheart.common.common import RegisterAddress
+from linearheart.utils.communication import fixed_to_float, float_to_fixed
 
 
 class ModbusVirtualSlave:

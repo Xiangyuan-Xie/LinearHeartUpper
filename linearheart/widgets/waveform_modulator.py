@@ -16,7 +16,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-from common import Interpolation, InterpolationManager
+from linearheart.common.common import Interpolation, InterpolationManager
 
 
 class WaveformStatus(enum.Enum):

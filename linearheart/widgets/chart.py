@@ -6,8 +6,8 @@ from loguru import logger
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import QMargins, QPointF, Qt, QThreadPool, Signal, Slot
 
-from common import waveform_mapping
-from task import SaveRecordTask, TaskRunner
+from linearheart.common.common import waveform_mapping
+from linearheart.utils.task import SaveRecordTask, TaskRunner
 
 
 class FeedbackWaveformChart(QChartView):

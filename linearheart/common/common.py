@@ -5,7 +5,7 @@ import numpy as np
 from loguru import logger
 from scipy.interpolate import Akima1DInterpolator, CubicSpline
 
-from communication import float_to_fixed
+from linearheart.utils.communication import float_to_fixed
 
 
 class Interpolation(Enum):

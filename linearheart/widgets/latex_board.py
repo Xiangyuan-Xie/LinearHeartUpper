@@ -4,7 +4,7 @@ from PySide6.QtCore import QThreadPool, Signal, Slot
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from task import ExpressionTask, TaskRunner
+from linearheart.utils.task import ExpressionTask, TaskRunner
 
 
 class LatexBoard(QWidget):
@@ -57,7 +57,7 @@ class LatexBoard(QWidget):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
-                    <script id="MathJax-script" async src="http://localhost:5000/MathJax/es5/tex-mml-chtml.js"></script>
+                    <script id="MathJax-script" async src="http://localhost:5000/mathjax/es5/tex-mml-chtml.js"></script>
                     <style>
                         p {
                             text-align:center;

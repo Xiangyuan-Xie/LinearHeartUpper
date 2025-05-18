@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from common import ConnectionStatus
+from linearheart.common.common import ConnectionStatus
 
 
 class ConnectionDialog(QDialog):

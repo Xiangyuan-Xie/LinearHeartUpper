@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 from scipy.interpolate import Akima1DInterpolator
 
-from common import coefficient_mapping
-from communication import fixed_to_float, float_to_fixed
+from linearheart.common.common import coefficient_mapping
+from linearheart.utils.communication import fixed_to_float, float_to_fixed
 
 tolerance = 1e-4
 config = {

@@ -5,8 +5,8 @@ from typing import Tuple, Union
 import numpy as np
 from scipy.interpolate import Akima1DInterpolator, CubicSpline
 
-from common import coefficient_mapping, waveform_mapping
-from communication import fixed_to_float
+from linearheart.common.common import coefficient_mapping, waveform_mapping
+from linearheart.utils.communication import fixed_to_float
 
 config = {
     "插值点集": [
@@ -29,8 +29,8 @@ def generate_waveform(
 ) -> Tuple[np.ndarray, np.ndarray]:
     timestamps = np.linspace(0, 1, 501)
 
-    x_vals, y_vals = zip(*config["插值点集"])
-    model = ModelClass(x_vals, y_vals)
+    points = np.array(config["插值点集"])
+    model = ModelClass(points[:, 0], points[:, 1])
 
     # 虚拟波形
     mock_waveform = waveform_mapping(config, motor_pool, np.column_stack((timestamps, model(timestamps))))
