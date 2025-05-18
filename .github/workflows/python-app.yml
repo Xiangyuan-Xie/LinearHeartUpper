@@ -48,17 +48,20 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt  
+        sudo apt-get update
+        sudo apt-get install -y libgl1 libegl1 xvfb
+        pip install -e .
         pip install pytest pytest-cov 
 
     - name: Run tests
       run: |
-        pytest --cov=./ --cov-report=xml:coverage.xml  tests/
+        pytest --cov=./ --cov-report=xml:coverage.xml  ./linearheart/tests/
 
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
       with:
-        file: coverage.xml
+        name: coverage-report
+        path: coverage.xml
 
   complexity-analysis:
     name: Code Complexity
@@ -81,3 +84,9 @@ jobs:
       run: |
         radon cc --min C -n D --total-average . > radon-report.txt  
         radon raw --summary . >> radon-report.txt
+
+    - name: Upload complexity report
+      uses: actions/upload-artifact@v4
+      with:
+        name: radon-complexity-report
+        path: radon-report.txt
