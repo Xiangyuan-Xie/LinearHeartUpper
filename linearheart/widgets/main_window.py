@@ -70,7 +70,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = {
-            "插值方法": Interpolation.Akima,
+            "插值方法": Interpolation.CubicSpline,
             "插值点集": [(0.0, 0.0), (1.0, 0.0)],
             "偏移量": 0.0,
             "频率": 1.0,
@@ -245,6 +245,7 @@ class MainWindow(QMainWindow):
 
         self.method_selection = QComboBox()
         self.method_selection.addItems([InterpolationManager.get_name(method) for method in Interpolation])
+        self.method_selection.setCurrentText(InterpolationManager.get_name(self.config["插值方法"]))
         self.method_selection.currentTextChanged.connect(
             lambda text: (
                 self.config.__setitem__("插值方法", Interpolation[text]),

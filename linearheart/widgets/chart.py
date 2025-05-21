@@ -6,7 +6,7 @@ from loguru import logger
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import QMargins, QPointF, Qt, QThreadPool, Signal, Slot
 
-from linearheart.common.common import waveform_mapping
+from linearheart.common.common import compute_features, waveform_mapping
 from linearheart.utils.task import SaveRecordTask, TaskRunner
 
 
@@ -150,8 +150,30 @@ class MockWaveformChart(QChartView):
         mapping_points = np.clip(
             waveform_mapping(self.config, self.motor_pool, new_samples), self.axis_y.min(), self.axis_y.max()
         )
-        logger.debug(f"虚拟波形拟合完毕，最大值：{max(mapping_points[:, 1])}，最小值：{min(mapping_points[:, 1])}")
-        self.waveform_series.replace([QPointF(x, y) for x, y in mapping_points])
+
+        vel, acc, jerk, dec = compute_features(mapping_points)
+        logger.debug(
+            f"虚拟波形拟合完毕：\n"
+            f"最大值：{max(mapping_points[:, 1])}\n"
+            f"最小值：{min(mapping_points[:, 1])}\n"
+            f"最大速度：{vel}\n"
+            f"最大加速度：{acc}\n"
+            f"最大减速度：{dec}\n"
+            f"最大加加速度：{jerk}"
+        )
+
+        tiled_points = []
+        repeat_count = int(np.ceil(self.axis_x.max() * self.config["频率"]))
+        period = 1 / self.config["频率"]
+        for i in range(repeat_count):
+            for point in mapping_points:
+                x = point[0]
+                if x <= self.axis_x.max():
+                    tiled_points.append(QPointF(i * period + point[0], point[1]))
+                else:
+                    break
+
+        self.waveform_series.replace(tiled_points)
         self.chart.update()
 
     def adjust_y_scale(self, y_min: float, y_max: float):

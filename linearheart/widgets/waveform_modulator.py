@@ -102,9 +102,7 @@ class WaveformModulator(QWidget):
 
         # 绘制插值曲线
         if len(self.config["插值点集"]) > 2:
-            self.interpolated_points = self.interpolate(
-                self.config["插值方法"], self.config["插值点集"]
-            )  # 计算插值曲线点集
+            self.interpolated_points = self.interpolate(self.config["插值方法"], self.config["插值点集"])
             if self.interpolated_points.size > 0:
                 painter.setPen(QPen(QColor(0, 0, 255), 2))  # 蓝色
 
@@ -140,7 +138,8 @@ class WaveformModulator(QWidget):
 
         sorted_points = sorted(points, key=lambda p: p[0])
         x_vals, y_vals = zip(*sorted_points)
-        poly = InterpolationManager.get_class(method)(x_vals, y_vals)
+        print(sorted_points)
+        poly = InterpolationManager.get_class(method)(x_vals, y_vals, bc_type=((1, 0.0), (1, 0.0)))
         x_new = np.linspace(0.0, 1.0, num_points)
         y_new = poly(x_new)
 

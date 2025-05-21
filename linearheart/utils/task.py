@@ -71,7 +71,7 @@ class ExpressionTask(QObject):
         """
         生成三次样条表达式
         """
-        poly = CubicSpline(x_vals, y_vals)
+        poly = CubicSpline(x_vals, y_vals, bc_type=((1, 0.0), (1, 0.0)))
 
         case_exprs = []
 
