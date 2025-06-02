@@ -9,7 +9,7 @@ from linearheart.widgets.status_light import StatusLight
 
 def float_to_fixed(arr: np.ndarray, frac_bits: int = 16, byte_order: str = "<") -> np.ndarray:
     """
-    批量将浮点数转换为Q格式定点数并拆分为高/低16位
+    批量将浮点数转换为定点数并拆分为高/低16位
     :param arr: 目标浮点数组，shape=(1,N)
     :param frac_bits: 小数部分位数
     :param byte_order: 端序

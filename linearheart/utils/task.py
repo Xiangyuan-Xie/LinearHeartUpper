@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from pymodbus.client import ModbusTcpClient
 from PySide6.QtCore import QDir, QObject, QRunnable, Signal
-from scipy.interpolate import Akima1DInterpolator, CubicSpline
 
 from linearheart.common.common import (
     Interpolation,
@@ -20,7 +19,7 @@ class TaskRunner(QRunnable):
         self.task = task
 
     def run(self):
-        self.task.run()  # 调用任务类的 run 方法
+        self.task.run()
 
 
 class ExpressionTask(QObject):
@@ -34,45 +33,11 @@ class ExpressionTask(QObject):
         self.method = method
 
     @staticmethod
-    def generate_akima_latex(x_vals, y_vals):
+    def generate_latex(poly):
         """
-        生成Akima插值表达式
+        生成LaTeX字符串
+        :param poly: 数学模型
         """
-        poly = Akima1DInterpolator(x_vals, y_vals)
-        case_exprs = []
-        breakpoints = poly.x
-        coefficients = poly.c.T
-
-        for i in range(len(breakpoints) - 1):
-            xi = round(breakpoints[i], 3)
-            xi_next = round(breakpoints[i + 1], 3)
-            c3, c2, c1, c0 = (round(v, 4) for v in coefficients[i])
-
-            terms = []
-            for expo, coef in enumerate([c3, c2, c1]):
-                if abs(coef) > 1e-6:  # 过滤微小系数
-                    power = 3 - expo
-                    exponent = f"^{power}" if power != 1 else ""
-                    base = f"{coef}(t - {xi}){exponent}" if xi != 0 else f"{coef}t{exponent}"
-                    term = base.replace("-", " - ").replace("+ -", "- ")
-                    terms.append(term)
-
-            if abs(c0) > 1e-6 or not terms:
-                c0_str = f"{c0}".replace("-", " - ")
-                terms.append(c0_str.lstrip("+"))
-
-            expr = " + ".join(terms).replace("+  -", "- ")
-            case_exprs.append(f"{expr}  &\\text{{, }} {xi} \\leq t < {xi_next} \\\\")
-
-        return poly, "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
-
-    @staticmethod
-    def generate_cubic_spline_latex(x_vals, y_vals):
-        """
-        生成三次样条表达式
-        """
-        poly = CubicSpline(x_vals, y_vals, bc_type=((1, 0.0), (1, 0.0)))
-
         case_exprs = []
 
         for i in range(len(poly.x) - 1):
@@ -100,7 +65,7 @@ class ExpressionTask(QObject):
 
             case_exprs.append(f"{expr} &\\text{{, }} {xi} \\leq t < {xi_next} \\\\")
 
-        return poly, "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
+        return "\\begin{cases}\n" + "\n".join(case_exprs) + "\n\\end{cases}"
 
     def run(self):
         if len(self.points) <= 2:
@@ -109,15 +74,9 @@ class ExpressionTask(QObject):
 
         try:
             x_vals, y_vals = zip(*self.points)
-            if self.method == Interpolation.Akima:
-                poly, poly_latex = self.generate_akima_latex(x_vals, y_vals)
-            elif self.method == Interpolation.CubicSpline:
-                poly, poly_latex = self.generate_cubic_spline_latex(x_vals, y_vals)
-            else:
-                raise ValueError("不支持的插值方法！")
-
+            poly = InterpolationManager.get_class(self.method)(x_vals, y_vals)
+            poly_latex = self.generate_latex(poly)
             self.result.emit(poly, poly_latex, f"{InterpolationManager.get_name(self.method)}插值方法计算完成！")
-
         except Exception as e:
             self.result.emit(None, "", f"插值多项式计算过程中出错：{e}")
 

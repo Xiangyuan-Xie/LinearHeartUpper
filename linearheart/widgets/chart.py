@@ -4,7 +4,7 @@ from typing import List, Sequence
 import numpy as np
 from loguru import logger
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from PySide6.QtCore import QMargins, QPointF, Qt, QThreadPool, Signal, Slot
+from PySide6.QtCore import QMargins, QPointF, Qt, QThreadPool, QTimer, Signal, Slot
 
 from linearheart.common.common import compute_features, waveform_mapping
 from linearheart.utils.task import SaveRecordTask, TaskRunner
@@ -44,6 +44,11 @@ class FeedbackWaveformChart(QChartView):
         self.chart.addAxis(self.y_axis, Qt.AlignmentFlag.AlignLeft)
         self.waveform_series.attachAxis(self.y_axis)
 
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setInterval(100)
+        self.refresh_timer.timeout.connect(self._refresh_visualization)
+        self.refresh_timer.start()
+
     def add_points(self, points: Sequence[float]) -> None:
         """
         向数据池中增加新数据点并触发更新
@@ -52,10 +57,13 @@ class FeedbackWaveformChart(QChartView):
         if not points:
             return
 
-        self.data_pool.extend(points)
+        clean_points = [p for p in points if np.isfinite(p)]
+        if not clean_points:
+            return
+
+        self.data_pool.extend(clean_points)
         if self.record_status:
-            self.record_data.extend(points)
-        self._refresh_visualization()
+            self.record_data.extend(clean_points)
 
     def adjust_display_scope(self, new_scope: int):
         """
@@ -151,14 +159,13 @@ class MockWaveformChart(QChartView):
             waveform_mapping(self.config, self.motor_pool, new_samples), self.axis_y.min(), self.axis_y.max()
         )
 
-        vel, acc, jerk, dec = compute_features(mapping_points)
+        vel, acc, jerk = compute_features(mapping_points)
         logger.debug(
             f"虚拟波形拟合完毕：\n"
             f"最大值：{max(mapping_points[:, 1])}\n"
             f"最小值：{min(mapping_points[:, 1])}\n"
             f"最大速度：{vel}\n"
             f"最大加速度：{acc}\n"
-            f"最大减速度：{dec}\n"
             f"最大加加速度：{jerk}"
         )
 

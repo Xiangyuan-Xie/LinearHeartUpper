@@ -1,4 +1,5 @@
 from enum import Enum, IntEnum, StrEnum
+from functools import partial
 from typing import Tuple, Union
 
 import numpy as np
@@ -9,26 +10,22 @@ from linearheart.utils.communication import float_to_fixed
 
 
 class Interpolation(Enum):
-    Akima = 0
-    CubicSpline = 1
+    CubicSpline = 0
 
 
 class InterpolationManager:
     @staticmethod
     def get_name(type: Interpolation):
-        if type == Interpolation.Akima:
-            return "Akima"
-        elif type == Interpolation.CubicSpline:
+        if type == Interpolation.CubicSpline:
             return "CubicSpline"
         else:
             raise ValueError("未知的插值方法！")
 
     @staticmethod
     def get_class(type: Interpolation | str):
-        if type == Interpolation.Akima or type == "Akima":
-            return Akima1DInterpolator
-        elif type == Interpolation.CubicSpline or type == "CubicSpline":
-            return CubicSpline
+        if type == Interpolation.CubicSpline or type == "CubicSpline":
+            return partial(CubicSpline, bc_type=((1, 0), (1, 0)))
+            # return partial(CubicSpline, bc_type="periodic")
         else:
             raise ValueError("未知的插值方法！")
 
@@ -120,11 +117,11 @@ def coefficient_mapping(
         return coefficients
 
 
-def compute_features(points: np.ndarray) -> Tuple[float, float, float, float]:
+def compute_features(points: np.ndarray) -> Tuple[float, float, float]:
     """
     运动学特征计算
     :param points : 曲线点集，shape=(N,2)
-    :return: (max_velocity, max_acceleration, max_deceleration, jerk)
+    :return: (max_velocity, max_acceleration, jerk)
     """
     if points.ndim != 2:
         raise ValueError("输入必须是N×2的二维数组")
@@ -143,13 +140,10 @@ def compute_features(points: np.ndarray) -> Tuple[float, float, float, float]:
 
     # 二阶导数：加速度
     acceleration = np.diff(velocity) / dt[:-1]
-    positive_accel = acceleration[acceleration > 0]  # 加速段
-    negative_accel = acceleration[acceleration < 0]  # 减速段
-    max_acceleration = positive_accel.max() if positive_accel.size > 0 else 0.0
-    max_deceleration = negative_accel.min() if negative_accel.size > 0 else 0.0
+    max_acceleration = acceleration.max() if acceleration.size > 0 else 0.0
 
     # 三阶导数：加加速度（jerk）
     jerk = np.diff(acceleration) / dt[:-2]
     max_jerk = np.max(np.abs(jerk)) if jerk.size > 0 else 0.0
 
-    return max_velocity, max_acceleration, max_deceleration, max_jerk
+    return max_velocity, max_acceleration, max_jerk

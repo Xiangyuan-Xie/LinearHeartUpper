@@ -138,8 +138,7 @@ class WaveformModulator(QWidget):
 
         sorted_points = sorted(points, key=lambda p: p[0])
         x_vals, y_vals = zip(*sorted_points)
-        print(sorted_points)
-        poly = InterpolationManager.get_class(method)(x_vals, y_vals, bc_type=((1, 0.0), (1, 0.0)))
+        poly = InterpolationManager.get_class(method)(x_vals, y_vals)
         x_new = np.linspace(0.0, 1.0, num_points)
         y_new = poly(x_new)
 

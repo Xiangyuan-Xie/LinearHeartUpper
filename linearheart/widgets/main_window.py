@@ -765,10 +765,11 @@ class MainWindow(QMainWindow):
         """
         fail_count = 0
         buffer_size = 1000
-        while not self._status_monitor_flag.is_set():
-            time.sleep(0.1)
 
-            # 状态字
+        while not self._status_monitor_flag.is_set():
+            time.sleep(0.05)
+
+            # 读取电机状态字
             status_response = self.client.read_input_registers(RegisterAddress.Input.Status, count=1)
             if status_response and not status_response.isError():
                 color, message = process_status_code(status_response.registers[0])
@@ -780,39 +781,73 @@ class MainWindow(QMainWindow):
                 fail_count += 1
 
             # 实时位置反馈
-            header_response = self.client.read_input_registers(RegisterAddress.Input.Header, count=2)
-            if header_response and not header_response.isError():
-                header = header_response.registers[0]
-                tailer = header_response.registers[1]
-                counter = (header - tailer + buffer_size) % buffer_size
-                if counter <= 0:
-                    continue
+            header_response = self.client.read_input_registers(RegisterAddress.Input.Header, count=1)
+            tailer_response = self.client.read_holding_registers(RegisterAddress.Holding.Tailer, count=1)
+            if header_response and not header_response.isError() and tailer_response and not tailer_response.isError():
+                current_header = header_response.registers[0]
+                current_tailer = tailer_response.registers[0]
+
+                counter = (current_header - current_tailer + buffer_size) % buffer_size
+                if counter <= 0 or counter >= buffer_size:
+                    continue  # 无新数据或非法
 
                 encoded_position = []
                 remaining = counter
+
                 while remaining > 0:
                     read_length = min(60, remaining)
-                    current_address = (tailer + (counter - remaining)) % buffer_size
+                    current_address = (current_tailer + (counter - remaining)) % buffer_size
+
                     if current_address + read_length > buffer_size:
                         first_segment = buffer_size - current_address
+                        second_segment = read_length - first_segment
+
                         pos_response1 = self.client.read_input_registers(
                             RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * first_segment
                         )
                         pos_response2 = self.client.read_input_registers(
-                            RegisterAddress.Input.Position_Start, count=2 * (read_length - first_segment)
+                            RegisterAddress.Input.Position_Start, count=2 * second_segment
                         )
-                        encoded_position.extend(pos_response1.registers + pos_response2.registers)
+
+                        if (
+                            pos_response1
+                            and pos_response2
+                            and not pos_response1.isError()
+                            and not pos_response2.isError()
+                        ):
+                            encoded_position.extend(pos_response1.registers + pos_response2.registers)
+                        else:
+                            logger.warning("跨界读取失败，终止本轮读取！")
+                            break
                     else:
                         pos_response = self.client.read_input_registers(
                             RegisterAddress.Input.Position_Start + 2 * current_address, count=2 * read_length
                         )
-                        encoded_position.extend(pos_response.registers)
+                        if pos_response and not pos_response.isError():
+                            encoded_position.extend(pos_response.registers)
+                        else:
+                            logger.warning("连续读取失败，终止本轮读取！")
+                            break
+
                     remaining -= read_length
 
-                tail_response = self.client.write_registers(RegisterAddress.Holding.Tailer, [header])
+                if len(encoded_position) % 2 != 0:
+                    logger.warning("读取结果长度为奇数，丢弃最后一个寄存器！")
+                    encoded_position = encoded_position[:-1]
+
+                # 写入 tailer，表示这些数据已消费
+                tail_response = self.client.write_registers(RegisterAddress.Holding.Tailer, [current_header])
                 if tail_response and not tail_response.isError():
-                    decoded_position = fixed_to_float(np.array(encoded_position))
-                    self.feedback_chart.add_points(decoded_position.tolist())
+                    try:
+                        decoded_position = fixed_to_float(np.array(encoded_position))
+                        if decoded_position.size > 0:
+                            self.feedback_chart.add_points(decoded_position.tolist())
+                    except Exception as e:
+                        logger.error(f"反馈数据解码失败: {e}")
+                else:
+                    logger.warning(f"Tailer写入失败，跳过当前批数据Header={current_header}")
+                    continue
+
                 fail_count = 0
             else:
                 fail_count += 1
@@ -821,7 +856,7 @@ class MainWindow(QMainWindow):
                     logger.error("PLC通信连接异常断开！")
                     self.connection_status.set_status(ConnectionStatus.Disconnected)
                     self.motor_status_manager.set_status(StatusLight.Color.Grey, "离线")
-                    if self.power_button.text() == MotorPowerStatus.PowerOff:  # 断连时电机还在通电
+                    if self.power_button.text() == MotorPowerStatus.PowerOff:
                         self.power_button.setText(MotorPowerStatus.PowerOn)
                     return
 
