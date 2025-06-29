@@ -30,7 +30,7 @@ Python项目在工程化部署中存在诸多不便，你可以使用以下方�
 ```
 - 生成可执行程序
 ```bash
-  pyinstaller --onefile --noconsole --add-data "MathJax:MathJax" main.py
+  pyinstaller --onefile --noconsole --add-data "linearheart/utils/mathjax:linearheart/utils/mathjax" linearheart/core/main.py
 ```
 ### 方法2：Nuitka
 - 安装`Nuitka`
@@ -39,13 +39,12 @@ Python项目在工程化部署中存在诸多不便，你可以使用以下方�
 ```
 - 生成可执行程序
 ```bash
-  nuitka --onefile --windows-console-mode=disable --include-package=scipy --enable-plugin=pyside6 --mingw64 --include-data-dir=MathJax=MathJax main.py
+  nuitka --onefile --windows-console-mode=disable --include-package=scipy --enable-plugin=pyside6 --mingw64 --include-data-dir=linearheart/utils/mathjax=linearheart/utils/mathjax linearheart/core/main.py
 ```
 
 ## 🙌 致谢
 - 感谢 [齐昕](https://me.ustb.edu.cn/shiziduiwu/jiaoshixinxi/2022-03-24/530.html) 老师为本项目提供的指导和支持！
 
 ## 🌟 作者
-- 姓名：[谢翔远](https://github.com/Xiangyuan-Xie)  
-- 学校：[北京科技大学](https://www.ustb.edu.cn/)  
+- 姓名：[谢翔远](https://github.com/Xiangyuan-Xie)
 - Email：[DragonBoat_XXY@163.com](mailto:DragonBoat_XXY@163.com)
